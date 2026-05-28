@@ -1,0 +1,301 @@
+import { Router } from 'express';
+import multer from 'multer';
+import { z } from 'zod';
+import { requireAuth } from '../middleware/auth.js';
+import { extractResumeText } from '../lib/tika.js';
+import { parseResumeWithGemini } from '../lib/gemini.js';
+import { getDemoStore, nextId } from '../lib/demoStore.js';
+import { supabaseAdmin, supabaseConfigured } from '../lib/supabase.js';
+
+const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+
+const stageSchema = z.object({
+  stage: z.enum(['new', 'parsed', 'shortlisted', 'interview_scheduled', 'selected', 'rejected']),
+});
+
+const noteSchema = z.object({
+  note: z.string().min(1).max(2000),
+  tags: z.array(z.string()).max(12).optional().default([]),
+});
+
+function normalizeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function candidateShape(candidate) {
+  return {
+    ...candidate,
+    skills: normalizeArray(candidate.skills),
+    education: normalizeArray(candidate.education),
+    experience: normalizeArray(candidate.experience),
+  };
+}
+
+router.get('/', requireAuth, async (_req, res) => {
+  if (!supabaseConfigured) {
+    const store = getDemoStore();
+    const candidates = store.candidates
+      .map((candidate) => ({
+        ...candidate,
+        latest_score: store.scores.find((score) => score.candidate_id === candidate.id) || null,
+        notes_count: store.notes.filter((note) => note.candidate_id === candidate.id).length,
+      }))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return res.json({ candidates, stages: store.pipelineStages });
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('candidates')
+    .select('*, candidate_job_scores(score, skill_match_percent, explanation), candidate_notes(id)')
+    .order('created_at', { ascending: false });
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const candidates = (data || []).map((candidate) => ({
+    ...candidateShape(candidate),
+    latest_score: candidate.candidate_job_scores?.[0] || null,
+    notes_count: candidate.candidate_notes?.length || 0,
+  }));
+
+  res.json({ candidates });
+});
+
+router.get('/:id', requireAuth, async (req, res) => {
+  const { id } = req.params;
+
+  if (!supabaseConfigured) {
+    const store = getDemoStore();
+    const candidate = store.candidates.find((item) => item.id === id);
+    if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
+
+    return res.json({
+      candidate,
+      resume: store.resumes.find((item) => item.candidate_id === id) || null,
+      notes: store.notes.filter((item) => item.candidate_id === id),
+      scores: store.scores.filter((item) => item.candidate_id === id),
+      history: store.stageHistory.filter((item) => item.candidate_id === id),
+      interviews: store.interviews.filter((item) => item.candidate_id === id),
+    });
+  }
+
+  const [{ data: candidate }, { data: resume }, { data: notes }, { data: scores }, { data: history }, { data: interviews }] = await Promise.all([
+    supabaseAdmin.from('candidates').select('*').eq('id', id).maybeSingle(),
+    supabaseAdmin.from('candidate_resumes').select('*').eq('candidate_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    supabaseAdmin.from('candidate_notes').select('*').eq('candidate_id', id).order('created_at', { ascending: false }),
+    supabaseAdmin.from('candidate_job_scores').select('*').eq('candidate_id', id).order('created_at', { ascending: false }),
+    supabaseAdmin.from('candidate_stage_history').select('*').eq('candidate_id', id).order('created_at', { ascending: false }),
+    supabaseAdmin.from('interviews').select('*').eq('candidate_id', id).order('created_at', { ascending: false }),
+  ]);
+
+  if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
+
+  res.json({
+    candidate: candidateShape(candidate),
+    resume: resume || null,
+    notes: notes || [],
+    scores: scores || [],
+    history: history || [],
+    interviews: interviews || [],
+  });
+});
+
+router.post('/upload', requireAuth, upload.single('resume'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Resume file is required' });
+
+  const text = await extractResumeText({
+    buffer: req.file.buffer,
+    filename: req.file.originalname,
+    mimeType: req.file.mimetype,
+  });
+  const parsed = candidateShape(await parseResumeWithGemini(text));
+
+  if (!supabaseConfigured) {
+    const store = getDemoStore();
+    const candidate = {
+      id: nextId('candidate'),
+      owner_id: req.user.id,
+      full_name: parsed.full_name || req.file.originalname.replace(/\.[^.]+$/, ''),
+      email: parsed.email || '',
+      phone: parsed.phone || '',
+      summary: parsed.summary || '',
+      current_company: parsed.current_company || '',
+      current_title: parsed.current_title || '',
+      years_experience: Number(parsed.years_experience || 0),
+      skills: normalizeArray(parsed.skills),
+      education: normalizeArray(parsed.education),
+      experience: normalizeArray(parsed.experience),
+      location: parsed.location || '',
+      stage: 'parsed',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const resume = {
+      id: nextId('resume'),
+      candidate_id: candidate.id,
+      file_name: req.file.originalname,
+      mime_type: req.file.mimetype,
+      extracted_text: text,
+      storage_path: null,
+      created_at: new Date().toISOString(),
+    };
+
+    store.candidates.unshift(candidate);
+    store.resumes.unshift(resume);
+    store.stageHistory.unshift({
+      id: nextId('history'),
+      candidate_id: candidate.id,
+      from_stage: 'new',
+      to_stage: 'parsed',
+      changed_by: req.user.id,
+      created_at: new Date().toISOString(),
+    });
+
+    return res.status(201).json({ candidate, resume });
+  }
+
+  const candidateInsert = {
+    owner_id: req.user.id,
+    full_name: parsed.full_name || req.file.originalname.replace(/\.[^.]+$/, ''),
+    email: parsed.email || '',
+    phone: parsed.phone || '',
+    summary: parsed.summary || '',
+    current_company: parsed.current_company || '',
+    current_title: parsed.current_title || '',
+    years_experience: Number(parsed.years_experience || 0),
+    skills: normalizeArray(parsed.skills),
+    education: normalizeArray(parsed.education),
+    experience: normalizeArray(parsed.experience),
+    location: parsed.location || '',
+    stage: 'parsed',
+  };
+
+  const { data: candidate, error: candidateError } = await supabaseAdmin
+    .from('candidates')
+    .insert(candidateInsert)
+    .select('*')
+    .single();
+
+  if (candidateError) return res.status(500).json({ error: candidateError.message });
+
+  let storagePath = null;
+  const bucket = process.env.SUPABASE_RESUME_BUCKET || 'resumes';
+  const uploadPath = `${candidate.id}/${Date.now()}-${req.file.originalname}`;
+  const { error: storageError } = await supabaseAdmin.storage.from(bucket).upload(uploadPath, req.file.buffer, {
+    contentType: req.file.mimetype,
+    upsert: false,
+  });
+  if (!storageError) storagePath = uploadPath;
+
+  const { data: resume, error: resumeError } = await supabaseAdmin
+    .from('candidate_resumes')
+    .insert({
+      candidate_id: candidate.id,
+      file_name: req.file.originalname,
+      mime_type: req.file.mimetype,
+      extracted_text: text,
+      storage_path: storagePath,
+      parse_status: 'parsed',
+    })
+    .select('*')
+    .single();
+
+  if (resumeError) return res.status(500).json({ error: resumeError.message });
+
+  await supabaseAdmin.from('candidate_stage_history').insert({
+    candidate_id: candidate.id,
+    from_stage: 'new',
+    to_stage: 'parsed',
+    changed_by: req.user.id,
+  });
+
+  res.status(201).json({ candidate: candidateShape(candidate), resume });
+});
+
+router.patch('/:id/stage', requireAuth, async (req, res) => {
+  const parsed = stageSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid stage' });
+
+  const { id } = req.params;
+  const { stage } = parsed.data;
+
+  if (!supabaseConfigured) {
+    const store = getDemoStore();
+    const candidate = store.candidates.find((item) => item.id === id);
+    if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
+
+    const fromStage = candidate.stage;
+    candidate.stage = stage;
+    candidate.updated_at = new Date().toISOString();
+    store.stageHistory.unshift({
+      id: nextId('history'),
+      candidate_id: id,
+      from_stage: fromStage,
+      to_stage: stage,
+      changed_by: req.user.id,
+      created_at: new Date().toISOString(),
+    });
+
+    return res.json({ candidate });
+  }
+
+  const { data: existing } = await supabaseAdmin.from('candidates').select('id, stage').eq('id', id).maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'Candidate not found' });
+
+  const { data: candidate, error } = await supabaseAdmin
+    .from('candidates')
+    .update({ stage, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  await supabaseAdmin.from('candidate_stage_history').insert({
+    candidate_id: id,
+    from_stage: existing.stage,
+    to_stage: stage,
+    changed_by: req.user.id,
+  });
+
+  res.json({ candidate: candidateShape(candidate) });
+});
+
+router.post('/:id/notes', requireAuth, async (req, res) => {
+  const parsed = noteSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid note payload' });
+
+  const { id } = req.params;
+  const payload = parsed.data;
+
+  if (!supabaseConfigured) {
+    const store = getDemoStore();
+    const note = {
+      id: nextId('note'),
+      candidate_id: id,
+      note: payload.note,
+      tags: payload.tags,
+      created_by: req.user.id,
+      created_at: new Date().toISOString(),
+    };
+    store.notes.unshift(note);
+    return res.status(201).json({ note });
+  }
+
+  const { data: note, error } = await supabaseAdmin
+    .from('candidate_notes')
+    .insert({
+      candidate_id: id,
+      note: payload.note,
+      tags: payload.tags,
+      created_by: req.user.id,
+    })
+    .select('*')
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ note });
+});
+
+export default router;
