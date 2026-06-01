@@ -18,7 +18,6 @@ export default function SettingsPage() {
             <table className="min-w-full divide-y divide-white/10 text-left text-sm">
               <thead className="bg-white/[0.03] text-slate-300">
                 <tr>
-                  <th className="px-4 py-3 font-medium" />
                   <th className="px-4 py-3 font-medium">Service</th>
                   <th className="px-4 py-3 font-medium">Environment values</th>
                 </tr>
