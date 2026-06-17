@@ -1,5 +1,5 @@
 import mammoth from 'mammoth';
-import { PDFParse } from 'pdf-parse';
+import pdf from 'pdf-parse/lib/pdf-parse.js';
 
 function extensionFromName(name = '') {
   const parts = String(name).toLowerCase().split('.');
@@ -40,11 +40,10 @@ async function parseLocally(buffer, filename, mimeType) {
 
   if (extension === 'pdf' || mimeType === 'application/pdf') {
     try {
-      const parser = new PDFParse({ data: buffer });
-      const result = await parser.getText();
+      const result = await pdf(buffer);
       return (result.text || '').trim();
     } catch (err) {
-      console.warn('PDFParse extraction failed:', err);
+      console.warn('pdf-parse extraction failed:', err);
     }
   }
 
