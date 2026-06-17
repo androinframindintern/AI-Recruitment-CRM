@@ -181,44 +181,94 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 router.post('/upload', requireAuth, upload.single('resume'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Resume file is required' });
-
-  const text = await extractResumeText({
-    buffer: req.file.buffer,
-    filename: req.file.originalname,
-    mimeType: req.file.mimetype,
-  });
-
-  let parsed;
   try {
-    parsed = candidateShape(await parseResumeWithGemini(text));
-  } catch (geminiError) {
-    console.error('Gemini resume parsing failed, falling back to local fallback data:', geminiError);
-    
-    const emailMatch = text.match(/[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}/);
-    const phoneMatch = text.match(/(\+?\d[\d -]{9,15}\d)/);
-    const locationMatch = text.match(/([A-Z][a-zA-Z ]{1,30},\s*[A-Z][a-zA-Z ]{1,30})/);
-    const expMatch = text.match(/(\d+)\s*\+?\s*years?\s+(of\s+)?experience/i);
+    if (!req.file) return res.status(400).json({ error: 'Resume file is required' });
 
-    parsed = candidateShape({
-      full_name: req.file.originalname.replace(/\.[^.]+$/, ''),
-      email: emailMatch ? emailMatch[0] : '',
-      phone: phoneMatch ? phoneMatch[0].trim() : '',
-      summary: `Document text successfully extracted. AI structured parsing fell back due to: ${geminiError.message || 'Gemini error'}.`,
-      current_company: '',
-      current_title: 'Applicant',
-      years_experience: expMatch ? Number(expMatch[1]) : 0,
-      skills: [],
-      education: [],
-      experience: [],
-      location: locationMatch ? locationMatch[0].trim() : '',
-    });
-  }
+    console.log('Extracting text from uploaded file:', req.file.originalname);
+    let text;
+    try {
+      text = await extractResumeText({
+        buffer: req.file.buffer,
+        filename: req.file.originalname,
+        mimeType: req.file.mimetype,
+      });
+    } catch (extractErr) {
+      console.error('Text extraction failed:', extractErr);
+      return res.status(500).json({ error: `Text extraction failed: ${extractErr.message}` });
+    }
 
-  if (!supabaseConfigured) {
-    const store = getDemoStore();
-    const candidate = {
-      id: nextId('candidate'),
+    let parsed;
+    try {
+      parsed = candidateShape(await parseResumeWithGemini(text));
+    } catch (geminiError) {
+      console.error('Gemini resume parsing failed, falling back to local fallback data:', geminiError);
+      
+      const emailMatch = text.match(/[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}/);
+      const phoneMatch = text.match(/(\+?\d[\d -]{9,15}\d)/);
+      const locationMatch = text.match(/([A-Z][a-zA-Z ]{1,30},\s*[A-Z][a-zA-Z ]{1,30})/);
+      const expMatch = text.match(/(\d+)\s*\+?\s*years?\s+(of\s+)?experience/i);
+
+      parsed = candidateShape({
+        full_name: req.file.originalname.replace(/\.[^.]+$/, ''),
+        email: emailMatch ? emailMatch[0] : '',
+        phone: phoneMatch ? phoneMatch[0].trim() : '',
+        summary: `Document text successfully extracted. AI structured parsing fell back due to: ${geminiError.message || 'Gemini error'}.`,
+        current_company: '',
+        current_title: 'Applicant',
+        years_experience: expMatch ? Number(expMatch[1]) : 0,
+        skills: [],
+        education: [],
+        experience: [],
+        location: locationMatch ? locationMatch[0].trim() : '',
+      });
+    }
+
+    if (!supabaseConfigured) {
+      const store = getDemoStore();
+      const candidate = {
+        id: nextId('candidate'),
+        owner_id: req.user.id,
+        full_name: parsed.full_name || req.file.originalname.replace(/\.[^.]+$/, ''),
+        email: parsed.email || '',
+        phone: parsed.phone || '',
+        summary: parsed.summary || '',
+        current_company: parsed.current_company || '',
+        current_title: parsed.current_title || '',
+        years_experience: parseYearsExperience(parsed.years_experience || 0),
+        skills: normalizeArray(parsed.skills),
+        education: normalizeArray(parsed.education),
+        experience: normalizeArray(parsed.experience),
+        location: parsed.location || '',
+        stage: 'parsed',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const resume = {
+        id: nextId('resume'),
+        candidate_id: candidate.id,
+        file_name: req.file.originalname,
+        mime_type: req.file.mimetype,
+        extracted_text: text,
+        storage_path: null,
+        created_at: new Date().toISOString(),
+      };
+
+      store.candidates.unshift(candidate);
+      store.resumes.unshift(resume);
+      store.stageHistory.unshift({
+        id: nextId('history'),
+        candidate_id: candidate.id,
+        from_stage: 'new',
+        to_stage: 'parsed',
+        changed_by: req.user.id,
+        created_at: new Date().toISOString(),
+      });
+
+      return res.status(201).json({ candidate, resume });
+    }
+
+    const candidateInsert = {
       owner_id: req.user.id,
       full_name: parsed.full_name || req.file.originalname.replace(/\.[^.]+$/, ''),
       email: parsed.email || '',
@@ -232,86 +282,75 @@ router.post('/upload', requireAuth, upload.single('resume'), async (req, res) =>
       experience: normalizeArray(parsed.experience),
       location: parsed.location || '',
       stage: 'parsed',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     };
 
-    const resume = {
-      id: nextId('resume'),
-      candidate_id: candidate.id,
-      file_name: req.file.originalname,
-      mime_type: req.file.mimetype,
-      extracted_text: text,
-      storage_path: null,
-      created_at: new Date().toISOString(),
-    };
+    console.log('Inserting candidate record into Supabase...');
+    const { data: candidate, error: candidateError } = await insertCandidateWithSchemaFallback(candidateInsert);
+    if (candidateError) {
+      console.error('Candidate insert failed:', candidateError);
+      return res.status(500).json({ error: `Candidate insert failed: ${candidateError.message}` });
+    }
 
-    store.candidates.unshift(candidate);
-    store.resumes.unshift(resume);
-    store.stageHistory.unshift({
-      id: nextId('history'),
-      candidate_id: candidate.id,
-      from_stage: 'new',
-      to_stage: 'parsed',
-      changed_by: req.user.id,
-      created_at: new Date().toISOString(),
-    });
+    if (!candidate) {
+      console.error('Candidate insert returned empty result');
+      return res.status(500).json({ error: 'Candidate insert returned empty result' });
+    }
 
-    return res.status(201).json({ candidate, resume });
+    let storagePath = null;
+    try {
+      const bucket = process.env.SUPABASE_RESUME_BUCKET || 'resumes';
+      const uploadPath = `${candidate.id}/${Date.now()}-${req.file.originalname}`;
+      console.log(`Uploading file to Supabase Storage in bucket "${bucket}"...`);
+      const { error: storageError } = await supabaseAdmin.storage.from(bucket).upload(uploadPath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: false,
+      });
+      if (!storageError) {
+        storagePath = uploadPath;
+      } else {
+        console.warn('Supabase storage upload failed:', storageError);
+      }
+    } catch (err) {
+      console.error('Supabase storage upload exception:', err);
+    }
+
+    console.log('Inserting resume record into Supabase...');
+    const { data: resume, error: resumeError } = await supabaseAdmin
+      .from('candidate_resumes')
+      .insert({
+        candidate_id: candidate.id,
+        file_name: req.file.originalname,
+        mime_type: req.file.mimetype,
+        extracted_text: text,
+        storage_path: storagePath,
+        parse_status: 'parsed',
+      })
+      .select('*')
+      .single();
+
+    if (resumeError) {
+      console.error('Resume insert failed:', resumeError);
+      return res.status(500).json({ error: `Resume record insert failed: ${resumeError.message}` });
+    }
+
+    try {
+      console.log('Logging initial stage transition history...');
+      await supabaseAdmin.from('candidate_stage_history').insert({
+        candidate_id: candidate.id,
+        from_stage: 'new',
+        to_stage: 'parsed',
+        changed_by: req.user.id,
+      });
+    } catch (err) {
+      console.warn('Candidate stage history insert exception (silenced):', err);
+    }
+
+    console.log('Resume parsed and candidate imported successfully:', candidate.id);
+    res.status(201).json({ candidate: candidateShape(candidate), resume });
+  } catch (err) {
+    console.error('Unhandled candidate upload error:', err);
+    res.status(500).json({ error: `Unhandled upload error: ${err.message}` });
   }
-
-  const candidateInsert = {
-    owner_id: req.user.id,
-    full_name: parsed.full_name || req.file.originalname.replace(/\.[^.]+$/, ''),
-    email: parsed.email || '',
-    phone: parsed.phone || '',
-    summary: parsed.summary || '',
-    current_company: parsed.current_company || '',
-    current_title: parsed.current_title || '',
-    years_experience: parseYearsExperience(parsed.years_experience || 0),
-    skills: normalizeArray(parsed.skills),
-    education: normalizeArray(parsed.education),
-    experience: normalizeArray(parsed.experience),
-    location: parsed.location || '',
-    stage: 'parsed',
-  };
-
-  const { data: candidate, error: candidateError } = await insertCandidateWithSchemaFallback(candidateInsert);
-
-  if (candidateError) return res.status(500).json({ error: candidateError.message });
-
-  let storagePath = null;
-  const bucket = process.env.SUPABASE_RESUME_BUCKET || 'resumes';
-  const uploadPath = `${candidate.id}/${Date.now()}-${req.file.originalname}`;
-  const { error: storageError } = await supabaseAdmin.storage.from(bucket).upload(uploadPath, req.file.buffer, {
-    contentType: req.file.mimetype,
-    upsert: false,
-  });
-  if (!storageError) storagePath = uploadPath;
-
-  const { data: resume, error: resumeError } = await supabaseAdmin
-    .from('candidate_resumes')
-    .insert({
-      candidate_id: candidate.id,
-      file_name: req.file.originalname,
-      mime_type: req.file.mimetype,
-      extracted_text: text,
-      storage_path: storagePath,
-      parse_status: 'parsed',
-    })
-    .select('*')
-    .single();
-
-  if (resumeError) return res.status(500).json({ error: resumeError.message });
-
-  await supabaseAdmin.from('candidate_stage_history').insert({
-    candidate_id: candidate.id,
-    from_stage: 'new',
-    to_stage: 'parsed',
-    changed_by: req.user.id,
-  });
-
-  res.status(201).json({ candidate: candidateShape(candidate), resume });
 });
 
 router.patch('/:id/stage', requireAuth, async (req, res) => {

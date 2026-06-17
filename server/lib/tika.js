@@ -30,14 +30,22 @@ async function parseWithTikaServer(buffer, filename, mimeType) {
 async function parseLocally(buffer, filename, mimeType) {
   const extension = extensionFromName(filename);
   if (extension === 'docx' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-    const result = await mammoth.extractRawText({ buffer });
-    return result.value.trim();
+    try {
+      const result = await mammoth.extractRawText({ buffer });
+      return result.value.trim();
+    } catch (err) {
+      console.warn('Mammoth docx extraction failed:', err);
+    }
   }
 
   if (extension === 'pdf' || mimeType === 'application/pdf') {
-    const parser = new PDFParse({ data: buffer });
-    const result = await parser.getText();
-    return (result.text || '').trim();
+    try {
+      const parser = new PDFParse({ data: buffer });
+      const result = await parser.getText();
+      return (result.text || '').trim();
+    } catch (err) {
+      console.warn('PDFParse extraction failed:', err);
+    }
   }
 
   return buffer.toString('utf8').trim();

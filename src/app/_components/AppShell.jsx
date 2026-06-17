@@ -284,8 +284,8 @@ export default function AppShell({ children }) {
           className="sticky top-0 z-40 flex items-center gap-4"
           style={{
             height: 60,
-            paddingLeft: 'max(16px, env(safe-area-inset-left))',
-            paddingRight: 'max(24px, env(safe-area-inset-right))',
+            paddingLeft: 'max(28px, env(safe-area-inset-left))',
+            paddingRight: 'max(28px, env(safe-area-inset-right))',
             background: 'rgba(4,6,15,0.88)',
             borderBottom: '1px solid rgba(255,255,255,0.055)',
             backdropFilter: 'blur(20px) saturate(180%)',
