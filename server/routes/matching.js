@@ -39,7 +39,19 @@ router.post('/score', requireAuth, async (req, res) => {
     }
 
     const similarity = scoreSimilarity(candidate, job);
-    const aiScore = await scoreCandidateMatch({ candidate, job });
+    let aiScore;
+    try {
+      aiScore = await scoreCandidateMatch({ candidate, job });
+    } catch (geminiError) {
+      console.error('Gemini candidate matching failed, using fallback scoring:', geminiError);
+      aiScore = {
+        score: Math.max(45, Math.min(95, similarity.score || 60)),
+        skill_match_percent: similarity.score,
+        matched_skills: similarity.matchedSkills,
+        missing_skills: [],
+        explanation: `Fallback alignment score. Gemini request failed: ${geminiError.message || 'Gemini error'}.`,
+      };
+    }
     const score = {
       id: nextId('score'),
       candidate_id: candidate.id,
@@ -81,7 +93,19 @@ router.post('/score', requireAuth, async (req, res) => {
   }
 
   const similarity = scoreSimilarity(candidate, job);
-  const aiScore = await scoreCandidateMatch({ candidate, job });
+  let aiScore;
+  try {
+    aiScore = await scoreCandidateMatch({ candidate, job });
+  } catch (geminiError) {
+    console.error('Gemini candidate matching failed, using fallback scoring:', geminiError);
+    aiScore = {
+      score: Math.max(45, Math.min(95, similarity.score || 60)),
+      skill_match_percent: similarity.score,
+      matched_skills: similarity.matchedSkills,
+      missing_skills: [],
+      explanation: `Fallback alignment score. Gemini request failed: ${geminiError.message || 'Gemini error'}.`,
+    };
+  }
   const payload = {
     candidate_id: candidate.id,
     job_id: job.id,

@@ -32,6 +32,86 @@ function candidateShape(candidate) {
   };
 }
 
+function parseYearsExperience(val) {
+  if (typeof val === 'number') return val;
+  if (!val) return 0;
+  const match = String(val).match(/(\d+(\.\d+)?)/);
+  return match ? parseFloat(match[1]) : 0;
+}
+
+function getMissingSchemaColumn(error) {
+  const message = error?.message || '';
+  const match = message.match(/Could not find the '([^']+)' column of '([^']+)' in the schema cache/i);
+  if (!match) return null;
+
+  return {
+    column: match[1],
+    table: match[2],
+  };
+}
+
+async function insertCandidateWithSchemaFallback(candidateInsert) {
+  const ignoredColumns = new Set();
+
+  while (true) {
+    const payload = Object.fromEntries(
+      Object.entries(candidateInsert).filter(([key]) => !ignoredColumns.has(key)),
+    );
+
+    const result = await supabaseAdmin
+      .from('candidates')
+      .insert(payload)
+      .select('*')
+      .single();
+
+    if (!result.error) return result;
+
+    const missingColumn = getMissingSchemaColumn(result.error);
+    const shouldRetry = missingColumn
+      && missingColumn.table === 'candidates'
+      && Object.hasOwn(candidateInsert, missingColumn.column)
+      && !ignoredColumns.has(missingColumn.column);
+
+    if (!shouldRetry) return result;
+
+    ignoredColumns.add(missingColumn.column);
+    console.warn(
+      `Supabase candidates table is missing "${missingColumn.column}". Retrying insert without that column.`,
+    );
+  }
+}
+
+async function insertNoteWithSchemaFallback(noteInsert) {
+  const ignoredColumns = new Set();
+
+  while (true) {
+    const payload = Object.fromEntries(
+      Object.entries(noteInsert).filter(([key]) => !ignoredColumns.has(key)),
+    );
+
+    const result = await supabaseAdmin
+      .from('candidate_notes')
+      .insert(payload)
+      .select('*')
+      .single();
+
+    if (!result.error) return result;
+
+    const missingColumn = getMissingSchemaColumn(result.error);
+    const shouldRetry = missingColumn
+      && missingColumn.table === 'candidate_notes'
+      && Object.hasOwn(noteInsert, missingColumn.column)
+      && !ignoredColumns.has(missingColumn.column);
+
+    if (!shouldRetry) return result;
+
+    ignoredColumns.add(missingColumn.column);
+    console.warn(
+      `Supabase candidate_notes table is missing "${missingColumn.column}". Retrying insert without that column.`,
+    );
+  }
+}
+
 router.get('/', requireAuth, async (_req, res) => {
   if (!supabaseConfigured) {
     const store = getDemoStore();
@@ -108,7 +188,32 @@ router.post('/upload', requireAuth, upload.single('resume'), async (req, res) =>
     filename: req.file.originalname,
     mimeType: req.file.mimetype,
   });
-  const parsed = candidateShape(await parseResumeWithGemini(text));
+
+  let parsed;
+  try {
+    parsed = candidateShape(await parseResumeWithGemini(text));
+  } catch (geminiError) {
+    console.error('Gemini resume parsing failed, falling back to local fallback data:', geminiError);
+    
+    const emailMatch = text.match(/[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}/);
+    const phoneMatch = text.match(/(\+?\d[\d -]{9,15}\d)/);
+    const locationMatch = text.match(/([A-Z][a-zA-Z ]{1,30},\s*[A-Z][a-zA-Z ]{1,30})/);
+    const expMatch = text.match(/(\d+)\s*\+?\s*years?\s+(of\s+)?experience/i);
+
+    parsed = candidateShape({
+      full_name: req.file.originalname.replace(/\.[^.]+$/, ''),
+      email: emailMatch ? emailMatch[0] : '',
+      phone: phoneMatch ? phoneMatch[0].trim() : '',
+      summary: `Document text successfully extracted. AI structured parsing fell back due to: ${geminiError.message || 'Gemini error'}.`,
+      current_company: '',
+      current_title: 'Applicant',
+      years_experience: expMatch ? Number(expMatch[1]) : 0,
+      skills: [],
+      education: [],
+      experience: [],
+      location: locationMatch ? locationMatch[0].trim() : '',
+    });
+  }
 
   if (!supabaseConfigured) {
     const store = getDemoStore();
@@ -121,7 +226,7 @@ router.post('/upload', requireAuth, upload.single('resume'), async (req, res) =>
       summary: parsed.summary || '',
       current_company: parsed.current_company || '',
       current_title: parsed.current_title || '',
-      years_experience: Number(parsed.years_experience || 0),
+      years_experience: parseYearsExperience(parsed.years_experience || 0),
       skills: normalizeArray(parsed.skills),
       education: normalizeArray(parsed.education),
       experience: normalizeArray(parsed.experience),
@@ -163,7 +268,7 @@ router.post('/upload', requireAuth, upload.single('resume'), async (req, res) =>
     summary: parsed.summary || '',
     current_company: parsed.current_company || '',
     current_title: parsed.current_title || '',
-    years_experience: Number(parsed.years_experience || 0),
+    years_experience: parseYearsExperience(parsed.years_experience || 0),
     skills: normalizeArray(parsed.skills),
     education: normalizeArray(parsed.education),
     experience: normalizeArray(parsed.experience),
@@ -171,11 +276,7 @@ router.post('/upload', requireAuth, upload.single('resume'), async (req, res) =>
     stage: 'parsed',
   };
 
-  const { data: candidate, error: candidateError } = await supabaseAdmin
-    .from('candidates')
-    .insert(candidateInsert)
-    .select('*')
-    .single();
+  const { data: candidate, error: candidateError } = await insertCandidateWithSchemaFallback(candidateInsert);
 
   if (candidateError) return res.status(500).json({ error: candidateError.message });
 
@@ -283,19 +384,43 @@ router.post('/:id/notes', requireAuth, async (req, res) => {
     return res.status(201).json({ note });
   }
 
-  const { data: note, error } = await supabaseAdmin
-    .from('candidate_notes')
-    .insert({
-      candidate_id: id,
-      note: payload.note,
-      tags: payload.tags,
-      created_by: req.user.id,
-    })
-    .select('*')
-    .single();
+  const { data: note, error } = await insertNoteWithSchemaFallback({
+    candidate_id: id,
+    note: payload.note,
+    tags: payload.tags,
+    created_by: req.user.id,
+  });
 
   if (error) return res.status(500).json({ error: error.message });
   res.status(201).json({ note });
+});
+
+router.delete('/:id', requireAuth, async (req, res) => {
+  const { id } = req.params;
+
+  if (!supabaseConfigured) {
+    const store = getDemoStore();
+    const index = store.candidates.findIndex((item) => item.id === id);
+    if (index === -1) return res.status(404).json({ error: 'Candidate not found' });
+
+    store.candidates.splice(index, 1);
+    store.resumes = store.resumes.filter((item) => item.candidate_id !== id);
+    store.notes = store.notes.filter((item) => item.candidate_id !== id);
+    store.scores = store.scores.filter((item) => item.candidate_id !== id);
+    store.stageHistory = store.stageHistory.filter((item) => item.candidate_id !== id);
+    store.interviews = store.interviews.filter((item) => item.candidate_id !== id);
+
+    return res.json({ success: true });
+  }
+
+  const { error } = await supabaseAdmin
+    .from('candidates')
+    .delete()
+    .eq('id', id);
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  res.json({ success: true });
 });
 
 export default router;

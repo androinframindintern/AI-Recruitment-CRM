@@ -1,17 +1,47 @@
-export function PrimaryButton({ className = '', ...props }) {
+'use client';
+
+export function PrimaryButton({ children, className = '', ...props }) {
   return (
     <button
+      className={`btn btn-primary ${className}`}
       {...props}
-      className={`rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
-    />
+    >
+      {children}
+    </button>
   );
 }
 
-export function SecondaryButton({ className = '', ...props }) {
+export function SecondaryButton({ children, className = '', ...props }) {
   return (
     <button
+      className={`btn btn-secondary ${className}`}
       {...props}
-      className={`rounded-2xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
-    />
+    >
+      {children}
+    </button>
   );
 }
+
+export function GhostButton({ children, className = '', ...props }) {
+  return (
+    <button
+      className={`btn btn-ghost ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function DangerButton({ children, className = '', ...props }) {
+  return (
+    <button
+      className={`btn btn-danger ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+export default PrimaryButton;
