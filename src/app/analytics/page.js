@@ -3,7 +3,7 @@ import dynamic from 'next/dynamic';
 import { useQuery } from '@tanstack/react-query';
 import AppShell from '../_components/AppShell';
 import StatCard from '../_components/StatCard';
-import { apiGet } from '@/lib/api';
+import { getAnalyticsSummary } from '@/lib/recruitmentData';
 
 const AnalyticsCharts = dynamic(() => import('../_components/AnalyticsCharts'), {
   ssr: false,
@@ -21,7 +21,7 @@ const AnalyticsCharts = dynamic(() => import('../_components/AnalyticsCharts'), 
 export default function AnalyticsPage() {
   const { data } = useQuery({
     queryKey: ['analytics-page'],
-    queryFn: () => apiGet('/api/analytics/summary', { auth: true }),
+    queryFn: getAnalyticsSummary,
   });
 
   const totals = data?.totals || {};

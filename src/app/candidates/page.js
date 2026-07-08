@@ -2,7 +2,8 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPatch, apiPostForm } from '@/lib/api';
+import { createDemoCandidate, listCandidates, updateCandidateStage } from '@/lib/recruitmentData';
+import { extractTextFromResumeFile, parseCandidateWithGemini } from '@/lib/resumeParser';
 import AppShell from '../_components/AppShell';
 import EmptyState from '../_components/EmptyState';
 import { PrimaryButton, SecondaryButton } from '../_components/PrimaryButton';
@@ -17,6 +18,7 @@ const STAGES = [
   { id: 'rejected', label: 'Rejected', color: '#f43f5e', badgeCls: 'badge-rose' },
 ];
 
+
 export default function CandidatesPage() {
   const queryClient = useQueryClient();
   const [resumeFile, setResumeFile] = useState(null);
@@ -29,29 +31,37 @@ export default function CandidatesPage() {
 
   const candidatesQuery = useQuery({
     queryKey: ['candidates'],
-    queryFn: () => apiGet('/api/candidates', { auth: true }),
+    queryFn: listCandidates,
   });
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
-      const formData = new FormData();
-      formData.append('resume', resumeFile);
-      return apiPostForm('/api/candidates/upload', formData, { auth: true });
+      if (!resumeFile) throw new Error('Please select a resume file first.');
+      const resumeText = await extractTextFromResumeFile(resumeFile);
+      if (!resumeText.trim()) {
+        throw new Error('Could not extract text from this resume. Please upload a text-based PDF or DOCX file.');
+      }
+      const parsed = await parseCandidateWithGemini(resumeText, resumeFile.name);
+      return createDemoCandidate(parsed);
     },
     onSuccess: () => {
       setResumeFile(null);
-      setNotice('Resume uploaded and parsed successfully.');
+      setNotice('Resume parsed and candidate profile saved.');
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-candidates'] });
       queryClient.invalidateQueries({ queryKey: ['analytics-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['analytics-page'] });
     },
-    onError: (error) => setNotice(error.message || 'Resume upload failed'),
+    onError: (error) => setNotice(error.message || 'Resume import failed'),
   });
 
   const stageMutation = useMutation({
-    mutationFn: ({ candidateId, stage }) => apiPatch(`/api/candidates/${candidateId}/stage`, { stage }, { auth: true }),
+    mutationFn: ({ candidateId, stage }) => updateCandidateStage(candidateId, stage),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-candidates'] });
       queryClient.invalidateQueries({ queryKey: ['analytics-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['analytics-page'] });
     },
   });
 
@@ -172,22 +182,22 @@ export default function CandidatesPage() {
           Candidates Board
         </h1>
         <p className="mt-2 text-sm text-[#8b95b0]">
-          Manage resumes, check AI scores, and move candidates through the ATS stages.
+          Manage candidates, create frontend-only scores, and move candidates through the ATS stages.
         </p>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr] items-start animate-fade-in">
         {/* Left Side: Upload & Search Panel */}
         <div className="space-y-6">
-          <SectionCard 
-            title="Upload Resume" 
-            description="Upload PDF or DOCX format resumes. AI extracts key details automatically."
+          <SectionCard
+            title="Upload Resume"
+            description="Upload PDF or DOCX format resumes."
           >
             <div className="rounded-2xl border-2 border-dashed border-white/10 bg-white/[0.015] hover:bg-white/[0.03] hover:border-indigo-500/30 transition-all p-6 text-center relative group">
-              <input 
-                type="file" 
-                accept=".pdf,.doc,.docx" 
-                onChange={handleFileChange} 
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx"
+                onChange={handleFileChange}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
               />
               <div className="flex flex-col items-center justify-center gap-3">
@@ -211,8 +221,8 @@ export default function CandidatesPage() {
                   </svg>
                   <span className="text-xs text-white truncate font-medium">{resumeFile.name}</span>
                 </div>
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => setResumeFile(null)}
                   className="text-xs text-slate-500 hover:text-white"
                 >
@@ -223,13 +233,13 @@ export default function CandidatesPage() {
 
             {resumeFile && (
               <div className="mt-4">
-                <PrimaryButton 
-                  type="button" 
-                  disabled={uploadMutation.isPending} 
+                <PrimaryButton
+                  type="button"
+                  disabled={uploadMutation.isPending}
                   onClick={() => uploadMutation.mutate()}
                   className="w-full justify-center"
                 >
-                  {uploadMutation.isPending ? 'Parsing Resume…' : 'Upload & Parse Resume'}
+                  {uploadMutation.isPending ? 'Importing Resume…' : 'Upload & Import Resume'}
                 </PrimaryButton>
               </div>
             )}

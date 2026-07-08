@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { apiGet } from './api';
+import { getCurrentProfile } from './recruitmentData';
 import { canUseSupabaseAuth, safeGetSession, supabase } from './supabaseClient';
 
 const authState = {
@@ -32,10 +32,14 @@ function emit() {
 async function loadProfile(user) {
   if (!user) return null;
   try {
-    const response = await apiGet('/api/me', { auth: true });
-    return response.profile || null;
+    return await getCurrentProfile(user);
   } catch {
-    return null;
+    return {
+      id: user.id,
+      email: user.email || '',
+      full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Recruiter',
+      role: user.user_metadata?.role || 'recruiter',
+    };
   }
 }
 

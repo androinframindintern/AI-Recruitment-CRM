@@ -63,6 +63,12 @@ function createStubClient() {
       async signUp() {
         return { data: { user: null, session: null }, error: authUnavailable };
       },
+      async resetPasswordForEmail() {
+        return { data: {}, error: null };
+      },
+      async updateUser() {
+        return { data: { user: null }, error: authUnavailable };
+      },
       onAuthStateChange() {
         return {
           data: {

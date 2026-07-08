@@ -7,7 +7,7 @@ import EmptyState from '../../_components/EmptyState';
 import { PrimaryButton, SecondaryButton, DangerButton } from '../../_components/PrimaryButton';
 import SectionCard from '../../_components/SectionCard';
 import ConfirmationModal from '../../_components/ConfirmationModal';
-import { apiGet, apiPost, apiDelete } from '@/lib/api';
+import { addCandidateNote, deleteCandidate as deleteCandidateRecord, getCandidateDetail, listJobs, scheduleInterviewDemo, scoreCandidateDemo } from '@/lib/recruitmentData';
 
 const STAGE_LABELS = {
   new: 'New',
@@ -34,7 +34,7 @@ export default function CandidateDetailPage() {
 
   const jobsQuery = useQuery({
     queryKey: ['jobs'],
-    queryFn: () => apiGet('/api/jobs', { auth: true }),
+    queryFn: listJobs,
   });
 
   function handleJobChange(jobId) {
@@ -98,11 +98,11 @@ export default function CandidateDetailPage() {
   const { data, isLoading } = useQuery({
     enabled: Boolean(candidateId),
     queryKey: ['candidate-detail', candidateId],
-    queryFn: () => apiGet(`/api/candidates/${candidateId}`, { auth: true }),
+    queryFn: () => getCandidateDetail(candidateId),
   });
 
   const addNote = useMutation({
-    mutationFn: () => apiPost(`/api/candidates/${candidateId}/notes`, { note: noteText, tags }, { auth: true }),
+    mutationFn: () => addCandidateNote(candidateId, { note: noteText, tags }),
     onSuccess: () => {
       setNoteText('');
       setTags([]);
@@ -146,12 +146,12 @@ export default function CandidateDetailPage() {
         });
       }
 
-      return apiPost('/api/matching/score', {
+      return scoreCandidateDemo({
         candidateId,
         jobId: selectedJobId || undefined,
         title: jobTitle || 'Untitled role',
         description: jobDescription,
-      }, { auth: true });
+      });
     },
     onMutate: () => {
       setScoringError('');
@@ -198,14 +198,14 @@ export default function CandidateDetailPage() {
   });
 
   const scheduleInterview = useMutation({
-    mutationFn: () => apiPost('/api/interviews/schedule', {
-      candidateId,
+    mutationFn: () => scheduleInterviewDemo(candidateId, {
       title: interviewTitle,
       description: `Interview scheduled for ${candidate?.full_name || 'candidate'}`,
       start: interviewStart,
       end: interviewEnd,
       attendeeEmail: candidate?.email || '',
-    }, { auth: true }),
+      jobId: selectedJobId || null,
+    }),
     onSuccess: () => {
       setFeedback('Interview scheduled successfully.');
       queryClient.invalidateQueries({ queryKey: ['candidate-detail', candidateId] });

@@ -2,7 +2,6 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
-import { apiPost } from '@/lib/api';
 
 export default function ResetPasswordPage() {
   const [email, setEmail] = useState('');
@@ -15,7 +14,8 @@ export default function ResetPasswordPage() {
     setBusy(true);
     setError('');
     try {
-      await apiPost('/api/auth/reset', { email }, { auth: false });
+      const redirectTo = `${window.location.origin}/reset-password/confirm`;
+      await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       setSent(true);
     } catch {
       // Still show success to prevent enumeration

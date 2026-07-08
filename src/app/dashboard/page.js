@@ -5,20 +5,20 @@ import AppShell from '../_components/AppShell';
 import EmptyState from '../_components/EmptyState';
 import SectionCard from '../_components/SectionCard';
 import StatCard from '../_components/StatCard';
-import { apiGet } from '@/lib/api';
+import { getAnalyticsSummary, listCandidates, listJobs } from '@/lib/recruitmentData';
 
 export default function DashboardPage() {
   const { data: analytics } = useQuery({
     queryKey: ['analytics-summary'],
-    queryFn: () => apiGet('/api/analytics/summary', { auth: true }),
+    queryFn: getAnalyticsSummary,
   });
   const { data: candidatesResponse } = useQuery({
     queryKey: ['dashboard-candidates'],
-    queryFn: () => apiGet('/api/candidates', { auth: true }),
+    queryFn: listCandidates,
   });
   const { data: jobsResponse } = useQuery({
     queryKey: ['dashboard-jobs'],
-    queryFn: () => apiGet('/api/jobs', { auth: true }),
+    queryFn: listJobs,
   });
 
   const totals = analytics?.totals || {};

@@ -7,7 +7,7 @@ import EmptyState from '../_components/EmptyState';
 import { PrimaryButton } from '../_components/PrimaryButton';
 import SectionCard from '../_components/SectionCard';
 import ConfirmationModal from '../_components/ConfirmationModal';
-import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
+import { createJob, deleteJob, listCandidates, listJobs, rankCandidatesForJobDemo, updateJob } from '@/lib/recruitmentData';
 
 const initialJob = {
   title: '',
@@ -29,16 +29,16 @@ export default function JobsPage() {
   
   const { data: jobsData } = useQuery({
     queryKey: ['jobs'],
-    queryFn: () => apiGet('/api/jobs', { auth: true }),
+    queryFn: listJobs,
   });
 
   const candidatesQuery = useQuery({
     queryKey: ['candidates'],
-    queryFn: () => apiGet('/api/candidates', { auth: true }),
+    queryFn: listCandidates,
   });
 
   const mutation = useMutation({
-    mutationFn: (payload) => apiPost('/api/jobs', payload, { auth: true }),
+    mutationFn: (payload) => createJob(payload),
     onSuccess: () => {
       setForm(initialJob);
       setMessage('Job description created successfully. You can now score candidates against it.');
@@ -48,7 +48,7 @@ export default function JobsPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, payload }) => apiPatch(`/api/jobs/${id}`, payload, { auth: true }),
+    mutationFn: ({ id, payload }) => updateJob(id, payload),
     onSuccess: () => {
       setForm(initialJob);
       setEditingJobId(null);
@@ -59,7 +59,7 @@ export default function JobsPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => apiDelete(`/api/jobs/${id}`, { auth: true }),
+    mutationFn: (id) => deleteJob(id),
     onSuccess: () => {
       setMessage('Job deleted successfully.');
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
@@ -69,24 +69,21 @@ export default function JobsPage() {
   });
 
   const toggleStatusMutation = useMutation({
-    mutationFn: ({ id, is_active }) => apiPatch(`/api/jobs/${id}`, { is_active }, { auth: true }),
+    mutationFn: ({ id, is_active }) => updateJob(id, { is_active }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
     },
   });
 
   const rankCandidatesMutation = useMutation({
-    mutationFn: (jobId) => apiPost(`/api/matching/jobs/${jobId}/candidates`, {
-      limit: 50,
-      backfillMissing: true,
-    }, { auth: true }),
+    mutationFn: (jobId) => rankCandidatesForJobDemo(jobId, { limit: 50 }),
     onMutate: (jobId) => {
       setRankingJobId(jobId);
-      setMessage('Ranking candidates using job and profile embeddings…');
+      setMessage('Ranking candidates with frontend-only demo skill matching…');
     },
     onSuccess: (result, jobId) => {
       setRankingResults((current) => ({ ...current, [jobId]: result.matches || [] }));
-      setMessage(`Ranked ${result.matches?.length || 0} candidates for this job.`);
+      setMessage(`Demo ranked ${result.matches?.length || 0} candidates for this job. No backend or Gemini API was called.`);
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
       queryClient.invalidateQueries({ queryKey: ['analytics-summary'] });
     },

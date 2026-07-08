@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
-import { apiGet, apiPost } from '@/lib/api';
+import { getCurrentProfile } from '@/lib/recruitmentData';
 
 const FEATURES = [
   {
@@ -122,12 +122,11 @@ export default function LoginPage() {
         if (signUpError) throw signUpError;
       }
 
-      await apiGet('/api/me', { auth: true }).catch(() => null);
+      await getCurrentProfile().catch(() => null);
       router.push('/dashboard');
     } catch (caught) {
       if (mode === 'signin') {
-        const exists = await apiPost('/api/me/check-email', { email }, { auth: false }).catch(() => ({ exists: true }));
-        setError(exists.exists ? 'Incorrect password. Please try again.' : 'This email is not registered. Create an account instead.');
+        setError(caught?.message || 'Could not sign in. Please check your email and password.');
       } else {
         setError(caught?.message || 'Registration failed. Please try again.');
       }
