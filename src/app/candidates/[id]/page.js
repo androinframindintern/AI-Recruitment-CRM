@@ -163,8 +163,8 @@ export default function CandidateDetailPage() {
         return;
       }
 
-      setScoringNotice('Gemini AI score saved.');
-      setFeedback('Gemini AI score saved.');
+      setScoringNotice('AI score saved.');
+      setFeedback('AI score saved.');
       queryClient.setQueryData(['candidate-detail', candidateId], (old) => {
         if (!old) return old;
         const existingScores = old.scores || [];
@@ -176,7 +176,6 @@ export default function CandidateDetailPage() {
           ],
         };
       });
-      queryClient.invalidateQueries({ queryKey: ['candidate-detail', candidateId] });
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
       queryClient.invalidateQueries({ queryKey: ['analytics-page'] });
       queryClient.invalidateQueries({ queryKey: ['analytics-summary'] });
@@ -217,7 +216,7 @@ export default function CandidateDetailPage() {
   });
 
   const deleteCandidate = useMutation({
-    mutationFn: () => apiDelete(`/api/candidates/${candidateId}`, { auth: true }),
+    mutationFn: () => deleteCandidateRecord(candidateId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
       queryClient.invalidateQueries({ queryKey: ['analytics-page'] });
@@ -248,7 +247,7 @@ export default function CandidateDetailPage() {
     );
   }
 
-  const latestScore = data?.scores?.[0];
+  const latestScore = scoreCandidate.data?.score || data?.scores?.[0];
   const latestInterview = data?.interviews?.[0];
 
   return (
