@@ -62,7 +62,8 @@ npm run server
 | `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anonymous key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-side service role key |
-| `GEMINI_API_KEY` | Yes | Google Gemini API key |
+| `GEMINI_API_KEY` | Yes | Google Gemini API key with available quota |
+| `GEMINI_SCORING_ENABLED` | Yes | Set to `true` to allow model-backed candidate scoring. If Gemini is unavailable, scoring returns an AI error instead of a fallback score. |
 | `RESEND_API_KEY` | Optional | Email sending |
 | `RESEND_FROM_EMAIL` | Optional | Verified sender email |
 | `GOOGLE_CLIENT_ID` | Optional | Google Calendar OAuth client |

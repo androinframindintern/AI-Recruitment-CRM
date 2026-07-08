@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.js';
 import { getDemoStore, nextId } from '../lib/demoStore.js';
+import { ensureJobEmbedding } from '../lib/embeddings.js';
 import { supabaseAdmin, supabaseConfigured } from '../lib/supabase.js';
 
 const router = Router();
@@ -14,13 +15,27 @@ const jobSchema = z.object({
   requirements: z.array(z.string()).max(30).optional().default([]),
 });
 
-router.get('/', requireAuth, async (_req, res) => {
+async function tryEnsureJobEmbedding(job) {
+  try {
+    await ensureJobEmbedding(job);
+    return { status: 'ready' };
+  } catch (error) {
+    console.warn('Job embedding generation failed:', error?.message || error);
+    return { status: 'failed', error: error?.message || 'Job embedding generation failed' };
+  }
+}
+
+router.get('/', requireAuth, async (req, res) => {
   if (!supabaseConfigured) {
     const jobs = getDemoStore().jobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     return res.json({ jobs });
   }
 
-  const { data, error } = await supabaseAdmin.from('jobs').select('*').order('created_at', { ascending: false });
+  const { data, error } = await supabaseAdmin
+    .from('jobs')
+    .select('*')
+    .eq('owner_id', req.user.id)
+    .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
   res.json({ jobs: data || [] });
 });
@@ -42,12 +57,74 @@ router.post('/', requireAuth, async (req, res) => {
       updated_at: new Date().toISOString(),
     };
     getDemoStore().jobs.unshift(job);
-    return res.status(201).json({ job });
+    const embedding = await tryEnsureJobEmbedding(job);
+    return res.status(201).json({ job, embedding });
   }
 
   const { data: job, error } = await supabaseAdmin.from('jobs').insert(payload).select('*').single();
   if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json({ job });
+  const embedding = await tryEnsureJobEmbedding(job);
+  res.status(201).json({ job, embedding });
+});
+
+router.patch('/:id', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  
+  // Create a schema that allows partial updates and handles is_active
+  const patchSchema = jobSchema.extend({
+    is_active: z.boolean().optional(),
+  }).partial();
+
+  const parsed = patchSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid update payload' });
+
+  const updates = parsed.data;
+
+  if (!supabaseConfigured) {
+    const store = getDemoStore();
+    const job = store.jobs.find((item) => item.id === id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+
+    Object.assign(job, updates, { updated_at: new Date().toISOString() });
+    const embedding = await tryEnsureJobEmbedding(job);
+    return res.json({ job, embedding });
+  }
+
+  const { data: job, error } = await supabaseAdmin
+    .from('jobs')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('owner_id', req.user.id)
+    .select('*')
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  const embedding = await tryEnsureJobEmbedding(job);
+  res.json({ job, embedding });
+});
+
+router.delete('/:id', requireAuth, async (req, res) => {
+  const { id } = req.params;
+
+  if (!supabaseConfigured) {
+    const store = getDemoStore();
+    const index = store.jobs.findIndex((item) => item.id === id);
+    if (index === -1) return res.status(404).json({ error: 'Job not found' });
+
+    store.jobs.splice(index, 1);
+    store.scores = store.scores.filter((s) => s.job_id !== id);
+    return res.json({ success: true });
+  }
+
+  const { error } = await supabaseAdmin
+    .from('jobs')
+    .delete()
+    .eq('id', id)
+    .eq('owner_id', req.user.id);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
 });
 
 export default router;
+

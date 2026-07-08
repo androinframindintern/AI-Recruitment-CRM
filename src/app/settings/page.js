@@ -15,8 +15,9 @@ const INTEGRATIONS = [
   },
   {
     service: 'Google Gemini AI',
-    variables: 'GEMINI_API_KEY',
-    desc: 'Extracts structured JSON profiles from plain resume documents and calculates job matches.',
+    variables: 'GEMINI_API_KEY, GEMINI_SCORING_ENABLED=true',
+    desc: 'Extracts structured resume profiles and calculates Gemini model-backed job match scores when quota is available.',
+    badge: 'Live API Required',
     icon: (
       <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
@@ -67,7 +68,7 @@ export default function SettingsPage() {
           CRM Integrations
         </h1>
         <p className="mt-2 text-sm text-[#8b95b0]">
-          Configure environment credentials to upgrade your workspace from sandbox sandbox mode to real API flows.
+          Configure environment credentials to upgrade your workspace from sandbox mode to real API flows.
         </p>
       </div>
 
@@ -92,7 +93,7 @@ export default function SettingsPage() {
                   <div className="flex flex-wrap items-center gap-2 mb-1">
                     <h3 className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors">{item.service}</h3>
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold bg-white/5 border border-white/5 text-slate-400">
-                      Sandbox Available
+                      {item.badge || 'Sandbox Available'}
                     </span>
                   </div>
                   <p className="text-xs text-[#8b95b0] leading-relaxed mb-3 font-normal">{item.desc}</p>
@@ -125,7 +126,7 @@ export default function SettingsPage() {
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0" />
                 <p>
                   <strong className="text-white font-bold block mb-0.5">Gemini AI Model</strong>
-                  Returns parsed profile metrics and matching alignments based on deterministic mock profiles until keys are added.
+                  Resume parsing can still extract document text, but candidate job scoring requires live Gemini credentials, <code className="text-indigo-300 font-mono">GEMINI_SCORING_ENABLED=true</code>, and available quota. If Gemini is unavailable, scoring shows an AI error instead of a fallback score.
                 </p>
               </div>
 

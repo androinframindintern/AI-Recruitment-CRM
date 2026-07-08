@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { apiGet, apiPost } from '@/lib/api';
 
 const FEATURES = [
@@ -99,8 +99,8 @@ export default function LoginPage() {
     setError('');
 
     try {
-      // Demo bypass
-      if (email === 'demo@recruitcrm.local') {
+      // Demo bypass (only if Supabase is not configured)
+      if (email === 'demo@recruitcrm.local' && !isSupabaseConfigured()) {
         router.push('/dashboard');
         return;
       }
@@ -206,17 +206,31 @@ export default function LoginPage() {
           </div>
 
           {/* Demo hint */}
-          <div
-            className="mt-8 rounded-2xl p-4 text-sm"
-            style={{
-              background: 'rgba(14,165,233,0.08)',
-              border: '1px solid rgba(14,165,233,0.18)',
-              color: '#7dd3fc',
-            }}
-          >
-            <p className="font-semibold mb-1">⚡ Quick demo access</p>
-            <p style={{ color: '#94a3b8' }}>Email: <code className="text-sky-300">demo@recruitcrm.local</code> · Any password</p>
-          </div>
+          {!isSupabaseConfigured() ? (
+            <div
+              className="mt-8 rounded-2xl p-4 text-sm"
+              style={{
+                background: 'rgba(14,165,233,0.08)',
+                border: '1px solid rgba(14,165,233,0.18)',
+                color: '#7dd3fc',
+              }}
+            >
+              <p className="font-semibold mb-1">⚡ Quick demo access</p>
+              <p style={{ color: '#94a3b8' }}>Email: <code className="text-sky-300">demo@recruitcrm.local</code> · Any password</p>
+            </div>
+          ) : (
+            <div
+              className="mt-8 rounded-2xl p-4 text-sm"
+              style={{
+                background: 'rgba(16,185,129,0.08)',
+                border: '1px solid rgba(16,185,129,0.18)',
+                color: '#a7f3d0',
+              }}
+            >
+              <p className="font-semibold mb-1">🛡️ Supabase Configured</p>
+              <p style={{ color: '#94a3b8' }}>Please use the <strong>Create Account</strong> tab to register your own credentials.</p>
+            </div>
+          )}
         </div>
 
         {/* RIGHT: auth form */}
@@ -326,19 +340,35 @@ export default function LoginPage() {
           </div>
 
           {/* Mobile demo hint */}
-          <div
-            className="mt-6 rounded-2xl p-4 text-sm lg:hidden"
-            style={{
-              background: 'rgba(14,165,233,0.08)',
-              border: '1px solid rgba(14,165,233,0.18)',
-              color: '#7dd3fc',
-            }}
-          >
-            <p className="font-semibold">⚡ Demo login</p>
-            <p className="mt-1" style={{ color: '#94a3b8' }}>
-              Email: <code className="text-sky-300">demo@recruitcrm.local</code> · Any password
-            </p>
-          </div>
+          {!isSupabaseConfigured() ? (
+            <div
+              className="mt-6 rounded-2xl p-4 text-sm lg:hidden"
+              style={{
+                background: 'rgba(14,165,233,0.08)',
+                border: '1px solid rgba(14,165,233,0.18)',
+                color: '#7dd3fc',
+              }}
+            >
+              <p className="font-semibold">⚡ Demo login</p>
+              <p className="mt-1" style={{ color: '#94a3b8' }}>
+                Email: <code className="text-sky-300">demo@recruitcrm.local</code> · Any password
+              </p>
+            </div>
+          ) : (
+            <div
+              className="mt-6 rounded-2xl p-4 text-sm lg:hidden"
+              style={{
+                background: 'rgba(16,185,129,0.08)',
+                border: '1px solid rgba(16,185,129,0.18)',
+                color: '#a7f3d0',
+              }}
+            >
+              <p className="font-semibold">🛡️ Supabase Configured</p>
+              <p className="mt-1" style={{ color: '#94a3b8' }}>
+                Create an account or sign in with your registered email.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

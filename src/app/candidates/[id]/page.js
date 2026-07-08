@@ -28,6 +28,28 @@ export default function CandidateDetailPage() {
   const [tagInput, setTagInput] = useState('');
   const [jobDescription, setJobDescription] = useState('');
   const [jobTitle, setJobTitle] = useState('');
+  const [selectedJobId, setSelectedJobId] = useState('');
+  const [scoringError, setScoringError] = useState('');
+  const [scoringNotice, setScoringNotice] = useState('');
+
+  const jobsQuery = useQuery({
+    queryKey: ['jobs'],
+    queryFn: () => apiGet('/api/jobs', { auth: true }),
+  });
+
+  function handleJobChange(jobId) {
+    setSelectedJobId(jobId);
+    if (jobId) {
+      const selected = (jobsQuery.data?.jobs || []).find((j) => j.id === jobId);
+      if (selected) {
+        setJobTitle(selected.title || '');
+        setJobDescription(selected.description || '');
+      }
+    } else {
+      setJobTitle('');
+      setJobDescription('');
+    }
+  }
   const [interviewTitle, setInterviewTitle] = useState('Technical Interview');
   const [interviewStart, setInterviewStart] = useState('');
   const [interviewEnd, setInterviewEnd] = useState('');
@@ -112,19 +134,67 @@ export default function CandidateDetailPage() {
   }
 
   const scoreCandidate = useMutation({
-    mutationFn: () => apiPost('/api/matching/score', {
-      candidateId,
-      title: jobTitle || 'Untitled role',
-      description: jobDescription,
-    }, { auth: true }),
-    onSuccess: () => {
-      setFeedback('Candidate scored successfully.');
+    mutationFn: () => {
+      const selectedJob = selectedJobId
+        ? (jobsQuery.data?.jobs || []).find((job) => job.id === selectedJobId)
+        : null;
+
+      if (selectedJobId && !selectedJob) {
+        setSelectedJobId('');
+        throw Object.assign(new Error('Selected job is no longer available. Please choose another job or use a custom description.'), {
+          body: { code: 'JOB_STALE' },
+        });
+      }
+
+      return apiPost('/api/matching/score', {
+        candidateId,
+        jobId: selectedJobId || undefined,
+        title: jobTitle || 'Untitled role',
+        description: jobDescription,
+      }, { auth: true });
+    },
+    onMutate: () => {
+      setScoringError('');
+      setScoringNotice('');
+    },
+    onSuccess: (result) => {
+      if (!result?.score) {
+        setScoringError('Gemini AI scoring completed, but no score was returned. No fallback score was generated.');
+        return;
+      }
+
+      setScoringNotice('Gemini AI score saved.');
+      setFeedback('Gemini AI score saved.');
+      queryClient.setQueryData(['candidate-detail', candidateId], (old) => {
+        if (!old) return old;
+        const existingScores = old.scores || [];
+        return {
+          ...old,
+          scores: [
+            result.score,
+            ...existingScores.filter((score) => score.id !== result.score.id),
+          ],
+        };
+      });
       queryClient.invalidateQueries({ queryKey: ['candidate-detail', candidateId] });
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
       queryClient.invalidateQueries({ queryKey: ['analytics-page'] });
       queryClient.invalidateQueries({ queryKey: ['analytics-summary'] });
     },
-    onError: (error) => setFeedback(error.message || 'Scoring failed'),
+    onError: (error) => {
+      const code = error?.body?.code;
+      const defaultMessage = error?.message || 'Gemini AI scoring failed. No fallback score was generated.';
+      const message = code === 'AI_SCORING_DISABLED'
+        ? 'Gemini AI scoring is disabled. Set GEMINI_SCORING_ENABLED=true and restart the app. No fallback score was generated.'
+        : code === 'AI_SCORING_NOT_CONFIGURED'
+          ? 'Gemini AI scoring is not configured. Add GEMINI_API_KEY and restart the app. No fallback score was generated.'
+          : code === 'AI_SCORING_QUOTA_EXHAUSTED'
+            ? 'Gemini quota or rate limit was reached. No fallback score was generated.'
+            : defaultMessage;
+
+      setScoringError(message);
+      setFeedback(message);
+    },
   });
 
   const scheduleInterview = useMutation({
@@ -379,27 +449,69 @@ export default function CandidateDetailPage() {
             description="Assess and score candidate experience match against specific job descriptions."
           >
             <div className="space-y-4">
-              <input 
-                value={jobTitle} 
-                onChange={(event) => setJobTitle(event.target.value)} 
-                placeholder="Role Title (e.g. Senior Backend Architect)" 
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-500/50"
-              />
-              <textarea 
-                rows={6} 
-                value={jobDescription} 
-                onChange={(event) => setJobDescription(event.target.value)} 
-                placeholder="Paste the role requirements, description, and qualifications here..." 
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-500/50"
-              />
-              <PrimaryButton 
-                type="button" 
-                disabled={!jobDescription.trim() || scoreCandidate.isPending} 
+              <div>
+                <span className="mb-2 block text-xs font-semibold text-[#8b95b0] uppercase tracking-wider">Select Job Opening</span>
+                <select
+                  value={selectedJobId}
+                  onChange={(e) => handleJobChange(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-[#080d1a] px-4 py-3 text-sm text-white focus:border-indigo-500/50 focus:bg-white/[0.07] transition-all"
+                >
+                  <option value="" className="bg-slate-900">-- Custom Job Description --</option>
+                  {(jobsQuery.data?.jobs || []).map((job) => (
+                    <option key={job.id} value={job.id} className="bg-slate-900">
+                      {job.title} {job.department ? `(${job.department})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <span className="mb-2 block text-xs font-semibold text-[#8b95b0] uppercase tracking-wider">Role Title</span>
+                <input 
+                  value={jobTitle} 
+                  onChange={(event) => {
+                    setSelectedJobId('');
+                    setJobTitle(event.target.value);
+                  }} 
+                  placeholder="Role Title (e.g. Senior Backend Architect)" 
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-500/50"
+                />
+              </div>
+
+              <div>
+                <span className="mb-2 block text-xs font-semibold text-[#8b95b0] uppercase tracking-wider">Role Description</span>
+                <textarea 
+                  rows={6} 
+                  value={jobDescription} 
+                  onChange={(event) => {
+                    setSelectedJobId('');
+                    setJobDescription(event.target.value);
+                  }} 
+                  placeholder="Paste the role requirements, description, and qualifications here..." 
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-500/50"
+                />
+              </div>
+              <PrimaryButton
+                type="button"
+                disabled={!jobDescription.trim() || scoreCandidate.isPending}
                 onClick={() => scoreCandidate.mutate()}
                 className="w-full justify-center"
               >
-                {scoreCandidate.isPending ? 'Calculating Alignment Score…' : 'Assess & Score Candidate'}
+                {scoreCandidate.isPending ? 'Calculating Gemini AI Score…' : 'Assess & Score Candidate'}
               </PrimaryButton>
+
+              {scoringNotice && (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-xs font-semibold text-emerald-200">
+                  {scoringNotice}
+                </div>
+              )}
+
+              {scoringError && (
+                <div className="rounded-xl border border-rose-500/25 bg-rose-500/10 px-4 py-3 text-xs leading-relaxed text-rose-100">
+                  <p className="font-bold text-white">Gemini AI scoring failed</p>
+                  <p className="mt-1">{scoringError}</p>
+                </div>
+              )}
             </div>
 
             {latestScore && (
@@ -411,7 +523,7 @@ export default function CandidateDetailPage() {
                     <span className="text-[9px] text-cyan-300 font-bold uppercase">Match</span>
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-white">AI Alignment Results</h3>
+                    <h3 className="text-sm font-bold text-white">Latest Saved Gemini AI Score</h3>
                     <p className="text-xs text-cyan-200 mt-1">Skill Match Matrix: {latestScore.skill_match_percent}%</p>
                   </div>
                 </div>

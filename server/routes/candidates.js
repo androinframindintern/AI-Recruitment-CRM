@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.js';
 import { extractResumeText } from '../lib/tika.js';
 import { parseResumeWithGemini } from '../lib/gemini.js';
+import { ensureCandidateEmbedding } from '../lib/embeddings.js';
 import { getDemoStore, nextId } from '../lib/demoStore.js';
 import { supabaseAdmin, supabaseConfigured } from '../lib/supabase.js';
 
@@ -112,6 +113,16 @@ async function insertNoteWithSchemaFallback(noteInsert) {
   }
 }
 
+async function tryEnsureCandidateEmbedding(candidate, resume) {
+  try {
+    await ensureCandidateEmbedding(candidate, resume);
+    return { status: 'ready' };
+  } catch (error) {
+    console.warn('Candidate embedding generation failed:', error?.message || error);
+    return { status: 'failed', error: error?.message || 'Candidate embedding generation failed' };
+  }
+}
+
 router.get('/', requireAuth, async (_req, res) => {
   if (!supabaseConfigured) {
     const store = getDemoStore();
@@ -119,6 +130,7 @@ router.get('/', requireAuth, async (_req, res) => {
       .map((candidate) => ({
         ...candidate,
         latest_score: store.scores.find((score) => score.candidate_id === candidate.id) || null,
+        job_scores: store.scores.filter((score) => score.candidate_id === candidate.id),
         notes_count: store.notes.filter((note) => note.candidate_id === candidate.id).length,
       }))
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -127,7 +139,7 @@ router.get('/', requireAuth, async (_req, res) => {
 
   const { data, error } = await supabaseAdmin
     .from('candidates')
-    .select('*, candidate_job_scores(score, skill_match_percent, explanation), candidate_notes(id)')
+    .select('*, candidate_job_scores(score, skill_match_percent, explanation, job_id), candidate_notes(id)')
     .order('created_at', { ascending: false });
 
   if (error) return res.status(500).json({ error: error.message });
@@ -135,11 +147,13 @@ router.get('/', requireAuth, async (_req, res) => {
   const candidates = (data || []).map((candidate) => ({
     ...candidateShape(candidate),
     latest_score: candidate.candidate_job_scores?.[0] || null,
+    job_scores: candidate.candidate_job_scores || [],
     notes_count: candidate.candidate_notes?.length || 0,
   }));
 
   res.json({ candidates });
 });
+
 
 router.get('/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
@@ -265,7 +279,8 @@ router.post('/upload', requireAuth, upload.single('resume'), async (req, res) =>
         created_at: new Date().toISOString(),
       });
 
-      return res.status(201).json({ candidate, resume });
+      const embedding = await tryEnsureCandidateEmbedding(candidate, resume);
+      return res.status(201).json({ candidate, resume, embedding });
     }
 
     const candidateInsert = {
@@ -345,8 +360,10 @@ router.post('/upload', requireAuth, upload.single('resume'), async (req, res) =>
       console.warn('Candidate stage history insert exception (silenced):', err);
     }
 
+    const shapedCandidate = candidateShape(candidate);
+    const embedding = await tryEnsureCandidateEmbedding(shapedCandidate, resume);
     console.log('Resume parsed and candidate imported successfully:', candidate.id);
-    res.status(201).json({ candidate: candidateShape(candidate), resume });
+    res.status(201).json({ candidate: shapedCandidate, resume, embedding });
   } catch (err) {
     console.error('Unhandled candidate upload error:', err);
     res.status(500).json({ error: `Unhandled upload error: ${err.message}` });

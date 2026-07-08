@@ -7,6 +7,7 @@
 -- Extensions
 create extension if not exists pgcrypto;
 create extension if not exists pg_trgm;  -- For full-text search on names/emails
+create extension if not exists vector;   -- For Gemini embedding similarity search
 
 -- ============================================================
 -- HELPER: auto-update updated_at columns
@@ -239,13 +240,27 @@ create table if not exists candidate_job_scores (
   matched_skills     jsonb not null default '[]'::jsonb,
   missing_skills     jsonb not null default '[]'::jsonb,
   explanation        text not null default '',
+  embedding_similarity double precision,
+  embedding_model    text,
+  scoring_method     text not null default 'gemini_llm',
   created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
   unique (candidate_id, job_id)
 );
+
+alter table candidate_job_scores
+  add column if not exists embedding_similarity double precision,
+  add column if not exists embedding_model text,
+  add column if not exists scoring_method text not null default 'gemini_llm',
+  add column if not exists updated_at timestamptz not null default now();
 
 create index if not exists scores_candidate_id_idx on candidate_job_scores(candidate_id);
 create index if not exists scores_job_id_idx       on candidate_job_scores(job_id);
 create index if not exists scores_score_idx        on candidate_job_scores(score desc);
+
+create or replace trigger candidate_job_scores_updated_at
+  before update on candidate_job_scores
+  for each row execute function set_updated_at();
 
 alter table candidate_job_scores enable row level security;
 
@@ -368,16 +383,37 @@ create policy "email_logs_insert_auth" on email_logs
   for insert with check (auth.uid() is not null);
 
 -- ============================================================
--- TABLE: candidate_embeddings (optional vector search)
+-- TABLE: candidate_embeddings (Gemini vector search)
 -- ============================================================
 create table if not exists candidate_embeddings (
-  id           uuid primary key default gen_random_uuid(),
-  candidate_id uuid not null references candidates(id) on delete cascade,
-  provider     text not null default 'gemini',
-  embedding    jsonb not null default '[]'::jsonb,
-  created_at   timestamptz not null default now(),
-  unique (candidate_id, provider)
+  id               uuid primary key default gen_random_uuid(),
+  candidate_id     uuid not null references candidates(id) on delete cascade,
+  provider         text not null default 'gemini',
+  model            text not null default 'text-embedding-004',
+  dimensions       int not null default 768,
+  content_hash     text not null default '',
+  embedding        jsonb not null default '[]'::jsonb,
+  embedding_vector vector(768),
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  unique (candidate_id, provider, model)
 );
+
+alter table candidate_embeddings
+  add column if not exists provider text not null default 'gemini',
+  add column if not exists model text not null default 'text-embedding-004',
+  add column if not exists dimensions int not null default 768,
+  add column if not exists content_hash text not null default '',
+  add column if not exists embedding_vector vector(768),
+  add column if not exists updated_at timestamptz not null default now();
+
+create unique index if not exists candidate_embeddings_candidate_provider_model_idx on candidate_embeddings(candidate_id, provider, model);
+create index if not exists candidate_embeddings_candidate_id_idx on candidate_embeddings(candidate_id);
+create index if not exists candidate_embeddings_vector_hnsw on candidate_embeddings using hnsw (embedding_vector vector_cosine_ops) where embedding_vector is not null;
+
+create or replace trigger candidate_embeddings_updated_at
+  before update on candidate_embeddings
+  for each row execute function set_updated_at();
 
 alter table candidate_embeddings enable row level security;
 
@@ -388,6 +424,80 @@ create policy "embeddings_insert_auth" on candidate_embeddings
   for insert with check (auth.uid() is not null);
 
 -- ============================================================
+-- TABLE: job_embeddings (Gemini vector search)
+-- ============================================================
+create table if not exists job_embeddings (
+  id               uuid primary key default gen_random_uuid(),
+  job_id           uuid not null references jobs(id) on delete cascade,
+  provider         text not null default 'gemini',
+  model            text not null default 'text-embedding-004',
+  dimensions       int not null default 768,
+  content_hash     text not null default '',
+  embedding        jsonb not null default '[]'::jsonb,
+  embedding_vector vector(768),
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  unique (job_id, provider, model)
+);
+
+alter table job_embeddings
+  add column if not exists provider text not null default 'gemini',
+  add column if not exists model text not null default 'text-embedding-004',
+  add column if not exists dimensions int not null default 768,
+  add column if not exists content_hash text not null default '',
+  add column if not exists embedding_vector vector(768),
+  add column if not exists updated_at timestamptz not null default now();
+
+create unique index if not exists job_embeddings_job_provider_model_idx on job_embeddings(job_id, provider, model);
+create index if not exists job_embeddings_job_id_idx on job_embeddings(job_id);
+create index if not exists job_embeddings_vector_hnsw on job_embeddings using hnsw (embedding_vector vector_cosine_ops) where embedding_vector is not null;
+
+create or replace trigger job_embeddings_updated_at
+  before update on job_embeddings
+  for each row execute function set_updated_at();
+
+alter table job_embeddings enable row level security;
+
+create policy "job_embeddings_select_auth" on job_embeddings
+  for select using (auth.uid() is not null);
+
+create policy "job_embeddings_insert_auth" on job_embeddings
+  for insert with check (auth.uid() is not null);
+
+create or replace function match_candidates_for_job(
+  p_job_id uuid,
+  p_owner_id uuid,
+  p_limit int default 50,
+  p_min_similarity double precision default 0
+)
+returns table (
+  candidate_id uuid,
+  similarity double precision
+)
+language sql
+stable
+as $$
+  select
+    c.id as candidate_id,
+    greatest(0, least(1, 1 - (ce.embedding_vector <=> je.embedding_vector))) as similarity
+  from job_embeddings je
+  join candidate_embeddings ce
+    on ce.provider = je.provider
+   and ce.model = je.model
+   and ce.dimensions = je.dimensions
+   and ce.embedding_vector is not null
+  join candidates c
+    on c.id = ce.candidate_id
+  where je.job_id = p_job_id
+    and je.embedding_vector is not null
+    and c.owner_id = p_owner_id
+    and greatest(0, least(1, 1 - (ce.embedding_vector <=> je.embedding_vector))) >= p_min_similarity
+  order by ce.embedding_vector <=> je.embedding_vector
+  limit least(greatest(p_limit, 1), 100);
+$$;
+
+
+-- ============================================================
 -- TABLE: email_templates (for customizable templates)
 -- ============================================================
 create table if not exists email_templates (
@@ -395,7 +505,7 @@ create table if not exists email_templates (
   name        text not null unique,
   subject     text not null,
   body        text not null,
-  type        text not null references email_logs check (
+  type        text not null check (
                 type in ('shortlisted', 'interview_scheduled', 'rejected', 'custom')
               ),
   is_default  boolean not null default false,
