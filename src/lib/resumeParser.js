@@ -1,5 +1,6 @@
 'use client';
 
+import { apiPostForm } from './api';
 import { isSupabaseConfigured, safeGetSession } from './supabaseClient';
 
 const COMMON_SKILLS = [
@@ -53,6 +54,18 @@ function extractBasicPdfText(arrayBuffer) {
     .replace(/\s+/g, ' '));
 }
 
+function looksLikeRawPdf(text) {
+  const clean = String(text || '').trim();
+  return clean.startsWith('%PDF-') || /\bobj\b[\s\S]{0,80}\bendobj\b/.test(clean.slice(0, 1200));
+}
+
+async function extractTextWithServer(file) {
+  const formData = new FormData();
+  formData.append('resume', file);
+  const result = await apiPostForm('/api/candidates/extract-text', formData, { auth: true });
+  return cleanText(result?.text || '');
+}
+
 export async function extractTextFromResumeFile(file) {
   if (!file) throw new Error('Resume file is required.');
 
@@ -65,6 +78,11 @@ export async function extractTextFromResumeFile(file) {
   }
 
   if (lowerName.endsWith('.docx')) {
+    try {
+      const serverText = await extractTextWithServer(file);
+      if (serverText) return serverText;
+    } catch {}
+
     const mammothModule = await import('mammoth');
     const mammoth = mammothModule.default || mammothModule;
     const arrayBuffer = await file.arrayBuffer();
@@ -73,12 +91,25 @@ export async function extractTextFromResumeFile(file) {
   }
 
   if (lowerName.endsWith('.pdf') || type === 'application/pdf') {
+    try {
+      const serverText = await extractTextWithServer(file);
+      if (serverText && !looksLikeRawPdf(serverText)) return serverText;
+    } catch {}
+
     const arrayBuffer = await file.arrayBuffer();
-    return extractBasicPdfText(arrayBuffer);
+    const browserText = extractBasicPdfText(arrayBuffer);
+    if (looksLikeRawPdf(browserText)) {
+      throw new Error('Could not extract readable text from this PDF. Please upload a text-based PDF, DOCX, or TXT resume.');
+    }
+    return browserText;
   }
 
   if (lowerName.endsWith('.doc')) {
-    throw new Error('Old .doc files cannot be parsed in browser-only mode. Please upload DOCX/PDF or save as DOCX first.');
+    try {
+      const serverText = await extractTextWithServer(file);
+      if (serverText && !looksLikeRawPdf(serverText)) return serverText;
+    } catch {}
+    throw new Error('Old .doc files could not be parsed. Please upload DOCX/PDF/TXT or save as DOCX first.');
   }
 
   return cleanText(await file.text().catch(() => ''));
@@ -127,6 +158,51 @@ function pickLocation(lines) {
   return locationLine?.slice(0, 80).trim() || '';
 }
 
+function normalizeStringList(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
+  if (typeof value === 'string') {
+    return value.split(/[\n,;|]/).map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeEducation(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      if (item && typeof item === 'object') {
+        return {
+          degree: String(item.degree || item.name || item.title || '').trim(),
+          institution: String(item.institution || item.school || item.university || '').trim(),
+          year: String(item.year || item.end_date || item.date || '').trim(),
+        };
+      }
+      return { degree: String(item || '').trim(), institution: '', year: '' };
+    }).filter((item) => item.degree || item.institution || item.year);
+  }
+
+  return normalizeStringList(value).map((item) => ({ degree: item, institution: '', year: '' }));
+}
+
+function normalizeExperience(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      if (item && typeof item === 'object') {
+        return {
+          company: String(item.company || item.organization || '').trim(),
+          title: String(item.title || item.role || item.position || '').trim(),
+          start_date: String(item.start_date || item.start || '').trim(),
+          end_date: String(item.end_date || item.end || '').trim(),
+          location: String(item.location || '').trim(),
+          highlights: normalizeStringList(item.highlights || item.responsibilities || item.description),
+        };
+      }
+      return { company: '', title: String(item || '').trim(), start_date: '', end_date: '', location: '', highlights: [] };
+    }).filter((item) => item.company || item.title || item.highlights.length);
+  }
+
+  return normalizeStringList(value).map((item) => ({ company: '', title: item, start_date: '', end_date: '', location: '', highlights: [] }));
+}
+
 export function parseCandidateFromResumeText(text, fileName = 'resume') {
   const clean = cleanText(text);
   const lines = clean.split('\n').map((line) => line.trim()).filter(Boolean);
@@ -143,6 +219,8 @@ export function parseCandidateFromResumeText(text, fileName = 'resume') {
     years_experience: pickExperience(clean),
     location: pickLocation(lines.slice(0, 20)),
     skills,
+    education: [],
+    experience: [],
     resumeText: clean,
     fileName,
   };
@@ -160,9 +238,9 @@ function normalizeGeminiProfile(profile, resumeText, fileName) {
     current_title: String(profile?.current_title || fallback.current_title || '').trim(),
     years_experience: Number(profile?.years_experience ?? fallback.years_experience ?? 0),
     location: String(profile?.location || fallback.location || '').trim(),
-    skills: Array.isArray(profile?.skills) && profile.skills.length ? profile.skills.map(String) : fallback.skills,
-    education: Array.isArray(profile?.education) ? profile.education : [],
-    experience: Array.isArray(profile?.experience) ? profile.experience : [],
+    skills: normalizeStringList(profile?.skills).length ? normalizeStringList(profile.skills) : fallback.skills,
+    education: normalizeEducation(profile?.education),
+    experience: normalizeExperience(profile?.experience),
     resumeText,
     fileName,
   };

@@ -194,6 +194,24 @@ router.get('/:id', requireAuth, async (req, res) => {
   });
 });
 
+router.post('/extract-text', requireAuth, upload.single('resume'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Resume file is required' });
+    const text = await extractResumeText({
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      mimeType: req.file.mimetype,
+    });
+    return res.json({
+      text,
+      fileName: req.file.originalname,
+      mimeType: req.file.mimetype,
+    });
+  } catch (error) {
+    return res.status(422).json({ error: error.message || 'Could not extract readable text from this resume.' });
+  }
+});
+
 router.post('/upload', requireAuth, upload.single('resume'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Resume file is required' });

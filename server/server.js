@@ -12,6 +12,8 @@ import candidatesRouter from './routes/candidates.js';
 import jobsRouter from './routes/jobs.js';
 import matchingRouter from './routes/matching.js';
 import interviewsRouter from './routes/interviews.js';
+import integrationsRouter from './routes/integrations.js';
+import availabilityRouter from './routes/availability.js';
 import analyticsRouter from './routes/analytics.js';
 
 function normalizeOrigin(origin) {
@@ -52,6 +54,8 @@ export function createApp() {
   app.use('/api/jobs', jobsRouter);
   app.use('/api/matching', matchingRouter);
   app.use('/api/interviews', interviewsRouter);
+  app.use('/api/integrations', integrationsRouter);
+  app.use('/api/candidate-availability', availabilityRouter);
   app.use('/api/analytics', analyticsRouter);
 
   app.use((err, _req, res, _next) => {

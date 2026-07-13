@@ -6,8 +6,13 @@ import AppShell from '../../_components/AppShell';
 import EmptyState from '../../_components/EmptyState';
 import { PrimaryButton, SecondaryButton, DangerButton } from '../../_components/PrimaryButton';
 import SectionCard from '../../_components/SectionCard';
+import CandidateAvailabilityPanel from '../../_components/CandidateAvailabilityPanel';
 import ConfirmationModal from '../../_components/ConfirmationModal';
-import { addCandidateNote, deleteCandidate as deleteCandidateRecord, getCandidateDetail, listJobs, scheduleInterviewDemo, scoreCandidateDemo } from '@/lib/recruitmentData';
+import InterviewStatusBadge from '../../_components/InterviewStatusBadge';
+import SyncStatusBadge from '../../_components/SyncStatusBadge';
+import { scheduleInterview as scheduleInterviewRecord } from '@/lib/interviewData';
+import { addCandidateNote, deleteCandidate as deleteCandidateRecord, getCandidateDetail, listJobs, scoreCandidateDemo } from '@/lib/recruitmentData';
+import { DEFAULT_TIMEZONE, TIMEZONE_OPTIONS } from '@/lib/timezones';
 
 const STAGE_LABELS = {
   new: 'New',
@@ -51,6 +56,12 @@ export default function CandidateDetailPage() {
     }
   }
   const [interviewTitle, setInterviewTitle] = useState('Technical Interview');
+  const [interviewType, setInterviewType] = useState('technical');
+  const [interviewerEmail, setInterviewerEmail] = useState('');
+  const [interviewTimezone, setInterviewTimezone] = useState(DEFAULT_TIMEZONE);
+  const [interviewLocation, setInterviewLocation] = useState('');
+  const [interviewNotes, setInterviewNotes] = useState('');
+  const [selectedAvailabilityId, setSelectedAvailabilityId] = useState('');
   const [interviewStart, setInterviewStart] = useState('');
   const [interviewEnd, setInterviewEnd] = useState('');
   const [feedback, setFeedback] = useState('');
@@ -73,6 +84,7 @@ export default function CandidateDetailPage() {
       return;
     }
     setFeedback('');
+    setSelectedAvailabilityId('');
     setInterviewStart(value);
     if (value && (!interviewEnd || new Date(interviewEnd) < new Date(value))) {
       const startDate = new Date(value);
@@ -92,7 +104,27 @@ export default function CandidateDetailPage() {
       return;
     }
     setFeedback('');
+    setSelectedAvailabilityId('');
     setInterviewEnd(value);
+  }
+
+  function toLocalDateTime(value) {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  }
+
+  function handleUseAvailabilitySlot(slot) {
+    setSelectedAvailabilityId(slot.id);
+    setInterviewStart(toLocalDateTime(slot.start_at));
+    setInterviewEnd(toLocalDateTime(slot.end_at));
+    setInterviewTimezone(slot.timezone || interviewTimezone);
+    setFeedback('Availability slot selected for scheduling.');
   }
 
   const { data, isLoading } = useQuery({
@@ -197,17 +229,28 @@ export default function CandidateDetailPage() {
   });
 
   const scheduleInterview = useMutation({
-    mutationFn: () => scheduleInterviewDemo(candidateId, {
+    mutationFn: () => scheduleInterviewRecord({
+      candidateId,
+      jobId: selectedJobId || null,
+      availabilityId: selectedAvailabilityId || null,
       title: interviewTitle,
-      description: `Interview scheduled for ${candidate?.full_name || 'candidate'}`,
+      interviewType,
+      notes: interviewNotes || `Interview scheduled for ${candidate?.full_name || 'candidate'}`,
       start: interviewStart,
       end: interviewEnd,
+      timezone: interviewTimezone,
+      location: interviewLocation,
       attendeeEmail: candidate?.email || '',
-      jobId: selectedJobId || null,
+      interviewerEmail,
+      createMeetLink: true,
+      sendUpdates: false,
     }),
     onSuccess: () => {
       setFeedback('Interview scheduled successfully.');
+      setSelectedAvailabilityId('');
       queryClient.invalidateQueries({ queryKey: ['candidate-detail', candidateId] });
+      queryClient.invalidateQueries({ queryKey: ['candidate-availability', candidateId] });
+      queryClient.invalidateQueries({ queryKey: ['interviews'] });
       queryClient.invalidateQueries({ queryKey: ['candidates'] });
       queryClient.invalidateQueries({ queryKey: ['analytics-page'] });
       queryClient.invalidateQueries({ queryKey: ['analytics-summary'] });
@@ -319,12 +362,47 @@ export default function CandidateDetailPage() {
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">Extracted Skills</p>
                 <div className="flex flex-wrap gap-2">
                   {candidate.skills.map((skill) => (
-                    <span 
-                      key={skill} 
+                    <span
+                      key={skill}
                       className="rounded px-2.5 py-1 text-xs font-semibold bg-white/5 border border-white/5 text-slate-300"
                     >
                       {skill}
                     </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(candidate.education || []).length > 0 && (
+              <div className="mt-6 border-t border-white/5 pt-5">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">Education</p>
+                <div className="space-y-3">
+                  {candidate.education.map((item, index) => (
+                    <div key={`${item.degree || item.title || index}-${index}`} className="rounded-xl border border-white/5 bg-white/[0.012] p-4">
+                      <p className="text-sm font-bold text-white">{educationTitle(item)}</p>
+                      {educationDetail(item) && <p className="mt-1 text-xs text-slate-400">{educationDetail(item)}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(candidate.experience || []).length > 0 && (
+              <div className="mt-6 border-t border-white/5 pt-5">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">Experience & Internships</p>
+                <div className="space-y-3">
+                  {candidate.experience.map((item, index) => (
+                    <div key={`${item.company || item.title || index}-${index}`} className="rounded-xl border border-white/5 bg-white/[0.012] p-4">
+                      <p className="text-sm font-bold text-white">{experienceTitle(item)}</p>
+                      {experienceMeta(item) && <p className="mt-1 text-xs text-slate-400">{experienceMeta(item)}</p>}
+                      {Array.isArray(item.highlights) && item.highlights.length > 0 && (
+                        <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-slate-400">
+                          {item.highlights.slice(0, 4).map((highlight, highlightIndex) => (
+                            <li key={`${highlight}-${highlightIndex}`}>{highlight}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -549,9 +627,21 @@ export default function CandidateDetailPage() {
             )}
           </SectionCard>
 
+          <SectionCard
+            title="Candidate Availability"
+            description="Manage preferred dates, time slots, and timezone before scheduling interviews."
+          >
+            <CandidateAvailabilityPanel
+              candidateId={candidateId}
+              initialAvailability={data?.availability || []}
+              onUseSlot={handleUseAvailabilitySlot}
+              onChanged={() => queryClient.invalidateQueries({ queryKey: ['candidate-detail', candidateId] })}
+            />
+          </SectionCard>
+
           {/* Communication & outreach */}
-          <SectionCard 
-            title="Calendar & Scheduling Workspace" 
+          <SectionCard
+            title="Calendar & Scheduling Workspace"
             description="Coordinate candidate interview events and sync calendar invitations."
           >
             <div className="space-y-4">
@@ -560,40 +650,110 @@ export default function CandidateDetailPage() {
                 
                 <div>
                   <label className="form-label mb-1.5 block">Meeting Title</label>
-                  <input 
-                    value={interviewTitle} 
-                    onChange={(event) => setInterviewTitle(event.target.value)} 
-                    placeholder="Technical Interview" 
+                  <input
+                    value={interviewTitle}
+                    onChange={(event) => setInterviewTitle(event.target.value)}
+                    placeholder="Technical Interview"
                     className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-indigo-500/50"
                   />
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <label className="form-label mb-1.5 block text-xs">Start Date/Time</label>
-                    <input 
-                      type="datetime-local" 
-                      value={interviewStart} 
-                      onChange={(event) => handleStartChange(event.target.value)} 
-                      min={getTodayDateTimeString()}
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white" 
-                    />
+                    <label className="form-label mb-1.5 block text-xs">Interview Type</label>
+                    <select
+                      value={interviewType}
+                      onChange={(event) => setInterviewType(event.target.value)}
+                      className="w-full rounded-xl border border-white/10 bg-[#080d1a] px-4 py-3 text-xs text-white"
+                    >
+                      <option value="hr" className="bg-slate-900">HR Interview</option>
+                      <option value="technical" className="bg-slate-900">Technical Interview</option>
+                      <option value="final" className="bg-slate-900">Final Interview</option>
+                      <option value="manager" className="bg-slate-900">Manager Round</option>
+                      <option value="custom" className="bg-slate-900">Custom</option>
+                    </select>
                   </div>
                   <div>
-                    <label className="form-label mb-1.5 block text-xs">End Date/Time</label>
-                    <input 
-                      type="datetime-local" 
-                      value={interviewEnd} 
-                      onChange={(event) => handleEndChange(event.target.value)} 
-                      min={interviewStart}
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white" 
+                    <label className="form-label mb-1.5 block text-xs">Interviewer</label>
+                    <input
+                      type="email"
+                      value={interviewerEmail}
+                      onChange={(event) => setInterviewerEmail(event.target.value)}
+                      placeholder="interviewer@company.com"
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white placeholder:text-slate-500"
                     />
                   </div>
                 </div>
 
-                <PrimaryButton 
-                  type="button" 
-                  disabled={!interviewStart || !interviewEnd || new Date(interviewEnd) < new Date(interviewStart) || scheduleInterview.isPending} 
+                {selectedAvailabilityId && (
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-xs font-semibold text-emerald-200">
+                    Scheduling from selected candidate availability slot.
+                  </div>
+                )}
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="form-label mb-1.5 block text-xs">Start Date/Time</label>
+                    <input
+                      type="datetime-local"
+                      value={interviewStart}
+                      onChange={(event) => handleStartChange(event.target.value)}
+                      min={getTodayDateTimeString()}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label mb-1.5 block text-xs">End Date/Time</label>
+                    <input
+                      type="datetime-local"
+                      value={interviewEnd}
+                      onChange={(event) => handleEndChange(event.target.value)}
+                      min={interviewStart}
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="form-label mb-1.5 block text-xs">Time Zone</label>
+                    <select
+                      value={interviewTimezone}
+                      onChange={(event) => setInterviewTimezone(event.target.value)}
+                      className="w-full rounded-xl border border-white/10 bg-[#080d1a] px-4 py-3 text-xs text-white"
+                    >
+                      {TIMEZONE_OPTIONS.map((timezone) => (
+                        <option key={timezone.value} value={timezone.value} className="bg-slate-900">
+                          {timezone.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label mb-1.5 block text-xs">Meeting Location</label>
+                    <input
+                      value={interviewLocation}
+                      onChange={(event) => setInterviewLocation(event.target.value)}
+                      placeholder="Google Meet, Office, Zoom link..."
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="form-label mb-1.5 block text-xs">Interview Notes</label>
+                  <textarea
+                    rows={3}
+                    value={interviewNotes}
+                    onChange={(event) => setInterviewNotes(event.target.value)}
+                    placeholder="Agenda, prep notes, or panel context..."
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white placeholder:text-slate-500"
+                  />
+                </div>
+
+                <PrimaryButton
+                  type="button"
+                  disabled={!interviewStart || !interviewEnd || new Date(interviewEnd) < new Date(interviewStart) || scheduleInterview.isPending}
                   onClick={() => scheduleInterview.mutate()}
                   className="w-full justify-center"
                 >
@@ -610,6 +770,10 @@ export default function CandidateDetailPage() {
                 </p>
                 <div className="mt-3 text-xs text-slate-300 font-medium">
                   <p className="font-semibold text-white text-sm">{latestInterview.title}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <InterviewStatusBadge status={latestInterview.status} />
+                    <SyncStatusBadge status={latestInterview.sync_status || (latestInterview.external_event_id ? 'synced' : 'not_connected')} />
+                  </div>
                   <p className="mt-1.5 text-slate-400">Scheduled: {new Date(latestInterview.start_at).toLocaleString()}</p>
                   {latestInterview.external_event_link && (
                     <a 
@@ -672,6 +836,28 @@ export default function CandidateDetailPage() {
       />
     </AppShell>
   );
+}
+
+function educationTitle(item = {}) {
+  if (typeof item === 'string') return item;
+  return item.degree || item.title || item.name || item.institution || 'Education';
+}
+
+function educationDetail(item = {}) {
+  if (typeof item === 'string') return '';
+  return [item.institution || item.school || item.university, item.year].filter(Boolean).join(' · ');
+}
+
+function experienceTitle(item = {}) {
+  if (typeof item === 'string') return item;
+  const title = item.title || item.role || item.position || 'Experience';
+  return item.company ? `${title} at ${item.company}` : title;
+}
+
+function experienceMeta(item = {}) {
+  if (typeof item === 'string') return '';
+  const dates = [item.start_date || item.start, item.end_date || item.end].filter(Boolean).join(' – ');
+  return [dates, item.location].filter(Boolean).join(' · ');
 }
 
 function Info({ label, value }) {

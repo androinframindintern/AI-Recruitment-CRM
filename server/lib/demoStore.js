@@ -24,8 +24,10 @@ const demoStore = {
   scores: [],
   notes: [],
   interviews: [],
+  availability: [],
   emails: [],
   stageHistory: [],
+  googleCalendarConnections: [],
 };
 
 let sequence = 1;

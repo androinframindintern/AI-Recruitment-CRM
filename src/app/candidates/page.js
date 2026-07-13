@@ -191,12 +191,12 @@ export default function CandidatesPage() {
         <div className="space-y-6">
           <SectionCard
             title="Upload Resume"
-            description="Upload PDF or DOCX format resumes."
+            description="Upload PDF, DOCX, or TXT format resumes."
           >
             <div className="rounded-2xl border-2 border-dashed border-white/10 bg-white/[0.015] hover:bg-white/[0.03] hover:border-indigo-500/30 transition-all p-6 text-center relative group">
               <input
                 type="file"
-                accept=".pdf,.doc,.docx"
+                accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
                 onChange={handleFileChange}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
               />
@@ -208,7 +208,7 @@ export default function CandidatesPage() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-white">Select a candidate resume</p>
-                  <p className="text-xs text-[#8b95b0] mt-1">Accepts PDF, DOCX or DOC up to 10MB</p>
+                  <p className="text-xs text-[#8b95b0] mt-1">Accepts PDF, DOCX or TXT resumes</p>
                 </div>
               </div>
             </div>

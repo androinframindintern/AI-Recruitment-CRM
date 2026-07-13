@@ -37,7 +37,34 @@ Deno.serve(async (req) => {
 
     if (!cleanText) return jsonResponse({ error: 'resumeText is required' }, 400);
 
-    const prompt = `Extract a structured recruitment profile from this resume text. Return only valid JSON with keys: full_name, email, phone, summary, current_company, current_title, years_experience, skills, education, experience, location. skills must be an array of strings. years_experience must be a number. If a field is missing use an empty string or empty array.\n\nFile name: ${fileName}\n\nResume text:\n${cleanText.slice(0, 18000)}`;
+    const prompt = `Extract a structured recruitment profile from this resume text. Return only valid JSON with exactly these keys:
+{
+  "full_name": "",
+  "email": "",
+  "phone": "",
+  "summary": "",
+  "current_company": "",
+  "current_title": "",
+  "years_experience": 0,
+  "skills": [],
+  "education": [{ "degree": "", "institution": "", "year": "" }],
+  "experience": [{ "company": "", "title": "", "start_date": "", "end_date": "", "location": "", "highlights": [] }],
+  "location": ""
+}
+Rules:
+- Return JSON only. No markdown.
+- skills must be an array of concise strings.
+- education must always be an array of objects. If no education is found, return [].
+- experience must always be an array of objects. Include internships, freelance, executive roles, and fresher status when present. If no experience is found, return [].
+- highlights must always be an array of strings.
+- years_experience must be a number. Estimate from dated roles if explicit years are missing.
+- current_title and current_company should come from the most recent role when available.
+- If a field is missing, use an empty string, 0, or [] according to the schema.
+
+File name: ${fileName}
+
+Resume text:
+${cleanText.slice(0, 18000)}`;
 
     const response = await fetch(`${apiUrl}/models/${model}:generateContent?key=${apiKey}`, {
       method: 'POST',

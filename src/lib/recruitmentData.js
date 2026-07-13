@@ -1,5 +1,6 @@
 'use client';
 
+import { DEFAULT_TIMEZONE } from './timezones';
 import { isSupabaseConfigured, safeGetSession, supabase } from './supabaseClient';
 
 const DEMO_USER = {
@@ -24,6 +25,7 @@ const DEFAULT_STORE = {
   scores: [],
   history: [],
   interviews: [],
+  availability: [],
   jobs: [],
 };
 
@@ -77,6 +79,12 @@ function normalizeArray(value) {
   return [];
 }
 
+function normalizeStructuredList(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === 'string' && value.trim()) return [{ title: value.trim() }];
+  return [];
+}
+
 function normalizeCandidate(candidate = {}) {
   const jobScores = (candidate.candidate_job_scores || candidate.job_scores || [])
     .map(normalizeScore)
@@ -86,8 +94,8 @@ function normalizeCandidate(candidate = {}) {
   return {
     ...candidate,
     skills: normalizeArray(candidate.skills),
-    education: Array.isArray(candidate.education) ? candidate.education : [],
-    experience: Array.isArray(candidate.experience) ? candidate.experience : [],
+    education: normalizeStructuredList(candidate.education),
+    experience: normalizeStructuredList(candidate.experience),
     tags: normalizeArray(candidate.tags),
     latest_score: candidate.latest_score || jobScores[0] || null,
     job_scores: jobScores,
@@ -334,9 +342,9 @@ export async function createDemoCandidate(payload = {}) {
     location: String(payload.location || '').trim(),
     stage: payload.stage || 'parsed',
     skills,
-    education: [],
-    experience: [],
-    tags: [],
+    education: normalizeStructuredList(payload.education),
+    experience: normalizeStructuredList(payload.experience),
+    tags: normalizeArray(payload.tags),
   };
 
   if (!requireSupabaseClient()) {
@@ -468,7 +476,7 @@ export async function getCandidateDetail(candidateId) {
   if (!requireSupabaseClient()) {
     const store = loadDemoStore();
     const candidate = store.candidates.find((item) => item.id === candidateId);
-    if (!candidate) return { candidate: null, resume: null, notes: [], scores: [], history: [], interviews: [] };
+    if (!candidate) return { candidate: null, resume: null, notes: [], scores: [], history: [], interviews: [], availability: [] };
     return {
       candidate: normalizeCandidate(candidate),
       resume: sortNewest(store.resumes.filter((item) => item.candidate_id === candidateId))[0] || null,
@@ -476,6 +484,9 @@ export async function getCandidateDetail(candidateId) {
       scores: sortNewest(store.scores.filter((item) => item.candidate_id === candidateId)).map(normalizeScore),
       history: sortNewest(store.history.filter((item) => item.candidate_id === candidateId)),
       interviews: sortNewest(store.interviews.filter((item) => item.candidate_id === candidateId)),
+      availability: store.availability
+        .filter((item) => item.candidate_id === candidateId)
+        .sort((a, b) => new Date(a.start_at || 0).getTime() - new Date(b.start_at || 0).getTime()),
     };
   }
 
@@ -487,17 +498,21 @@ export async function getCandidateDetail(candidateId) {
     .maybeSingle();
 
   if (error) throw new Error(error.message || 'Could not load candidate.');
-  if (!candidate) return { candidate: null, resume: null, notes: [], scores: [], history: [], interviews: [] };
+  if (!candidate) return { candidate: null, resume: null, notes: [], scores: [], history: [], interviews: [], availability: [] };
 
-  const [resumeRes, notesRes, scoresRes, historyRes, interviewsRes] = await Promise.all([
+  const [resumeRes, notesRes, scoresRes, historyRes, interviewsRes, availabilityRes] = await Promise.all([
     supabase.from('candidate_resumes').select('*').eq('candidate_id', candidateId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
     supabase.from('candidate_notes').select('*').eq('candidate_id', candidateId).order('created_at', { ascending: false }),
     supabase.from('candidate_job_scores').select('*').eq('candidate_id', candidateId).order('created_at', { ascending: false }),
     supabase.from('candidate_stage_history').select('*').eq('candidate_id', candidateId).order('created_at', { ascending: false }),
     supabase.from('interviews').select('*').eq('candidate_id', candidateId).order('created_at', { ascending: false }),
+    supabase.from('candidate_availability').select('*').eq('candidate_id', candidateId).order('start_at', { ascending: true }),
   ]);
 
-  const firstError = [resumeRes, notesRes, scoresRes, historyRes, interviewsRes].find((result) => result.error)?.error;
+  const safeAvailabilityRes = availabilityRes.error?.message?.toLowerCase().includes('candidate_availability')
+    ? { data: [], error: null }
+    : availabilityRes;
+  const firstError = [resumeRes, notesRes, scoresRes, historyRes, interviewsRes, safeAvailabilityRes].find((result) => result.error)?.error;
   if (firstError) throw new Error(firstError.message || 'Could not load candidate details.');
 
   return {
@@ -507,6 +522,7 @@ export async function getCandidateDetail(candidateId) {
     scores: (scoresRes.data || []).map(normalizeScore),
     history: historyRes.data || [],
     interviews: interviewsRes.data || [],
+    availability: safeAvailabilityRes.data || [],
   };
 }
 
@@ -556,6 +572,7 @@ export async function deleteCandidate(candidateId) {
     store.scores = store.scores.filter((item) => item.candidate_id !== candidateId);
     store.history = store.history.filter((item) => item.candidate_id !== candidateId);
     store.interviews = store.interviews.filter((item) => item.candidate_id !== candidateId);
+    store.availability = store.availability.filter((item) => item.candidate_id !== candidateId);
     saveDemoStore(store);
     return { success: true };
   }
@@ -736,17 +753,24 @@ export async function scheduleInterviewDemo(candidateId, payload) {
   if (endAt < startAt) throw new Error('End time cannot be earlier than start time.');
 
   const interviewPayload = {
+    owner_id: user.id,
     candidate_id: candidateId,
     job_id: payload.jobId || null,
+    availability_id: payload.availabilityId || null,
     title: String(payload.title || 'Demo Interview').trim(),
-    description: String(payload.description || 'Frontend-only demo interview. No calendar invite was sent.').trim(),
+    interview_type: payload.interviewType || 'custom',
+    description: String(payload.description || payload.notes || 'Frontend-only demo interview. No calendar invite was sent.').trim(),
     attendee_email: payload.attendeeEmail || detail.candidate.email || '',
-    interviewer_email: user.email || '',
+    interviewer_email: payload.interviewerEmail || user.email || '',
     start_at: startAt.toISOString(),
     end_at: endAt.toISOString(),
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    timezone: payload.timezone || DEFAULT_TIMEZONE,
+    location: payload.location || '',
     external_event_id: createId('demo-event'),
     external_event_link: '',
+    meeting_url: '',
+    calendar_provider: 'demo',
+    sync_status: 'demo',
     status: 'scheduled',
     created_by: user.id,
   };
@@ -759,6 +783,8 @@ export async function scheduleInterviewDemo(candidateId, payload) {
       created_at: nowIso(),
     };
     store.interviews.unshift(interview);
+    const availability = store.availability.find((item) => item.id === interview.availability_id);
+    if (availability) availability.status = 'booked';
     saveDemoStore(store);
     await updateCandidateStage(candidateId, 'interview_scheduled');
     return { interview };

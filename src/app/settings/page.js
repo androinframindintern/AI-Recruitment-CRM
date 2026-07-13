@@ -1,4 +1,5 @@
 import AppShell from '../_components/AppShell';
+import GoogleCalendarSettingsPanel from '../_components/GoogleCalendarSettingsPanel';
 import SectionCard from '../_components/SectionCard';
 
 const INTEGRATIONS = [
@@ -46,8 +47,8 @@ const INTEGRATIONS = [
   },
   {
     service: 'Google Calendar Sync',
-    variables: 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN, GOOGLE_CALENDAR_ID',
-    desc: 'Schedules calendar meetings and video-call attachments directly on recruiter calendar feeds.',
+    variables: 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, GOOGLE_OAUTH_STATE_SECRET, GOOGLE_TOKEN_ENCRYPTION_KEY',
+    desc: 'Connects recruiter Google accounts with OAuth, stores encrypted refresh tokens server-side, and synchronizes interview events.',
     icon: (
       <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -107,10 +108,12 @@ export default function SettingsPage() {
           </div>
         </SectionCard>
 
-        {/* Right Column: Demo guidelines */}
+        {/* Right Column: Google Calendar controls and demo guidelines */}
         <div className="space-y-6">
-          <SectionCard 
-            title="Sandbox Mode Policies" 
+          <GoogleCalendarSettingsPanel />
+
+          <SectionCard
+            title="Sandbox Mode Policies"
             description="The CRM runs immediately in-memory if external keys are missing."
           >
             <div className="space-y-5 text-xs sm:text-sm text-slate-300 leading-relaxed font-normal">
