@@ -10,7 +10,7 @@ AI Recruitment CRM is a recruiting workflow application for uploading resumes, m
 - **Backend:** Express 5 API, mounted either standalone or through Next.js API catch-all routing
 - **Auth/database/storage:** Supabase Auth, Postgres, Storage, Row Level Security policies in schema
 - **AI/parsing/search:** Gemini for resume parsing, scoring, and embeddings; token/cosine fallback matching; optional Apache Tika, `pdf-parse`, and `mammoth` for document extraction
-- **Integrations:** Google Calendar scheduling, Resend/email schema groundwork, optional OpenAI helper currently not wired into routes
+- **Integrations:** Nodemailer/SMTP email automation, Google Calendar scheduling, optional OpenAI helper currently not wired into routes
 - **Tooling/config:** npm, ESLint, PostCSS, `next build --webpack`, path alias `@/*` to `src/*`
 
 ## Folder Map
@@ -71,7 +71,8 @@ Main backend areas:
 - **Jobs:** create, read, update, delete, status toggle
 - **Matching:** candidate/job scoring with Gemini embeddings and fallback similarity logic
 - **Interviews:** Google Calendar event creation or demo event metadata
-- **Analytics:** pipeline counts, score summaries, interview counts, creation trends
+- **Emails:** Nodemailer/SMTP-backed shortlist/rejection previews, sends, templates, and logs
+- **Analytics:** pipeline counts, score summaries, interview/email counts, funnel metrics, and candidate reporting
 
 When Supabase env vars are missing, `server/lib/supabase.js` switches to demo mode with in-memory data. Demo records disappear after restart.
 
@@ -135,16 +136,21 @@ OPENAI_MODEL=
 # Resume extraction
 TIKA_SERVER_URL=
 
+# SMTP Email
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM_EMAIL=
+SMTP_FROM_NAME=AI Recruitment CRM
+
 # Google Calendar
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REFRESH_TOKEN=
 GOOGLE_CALENDAR_ID=
 GOOGLE_REDIRECT_URI=
-
-# Email
-RESEND_API_KEY=
-RESEND_FROM_EMAIL=
 ```
 
 Important note: the scan reported that `.env.example` may contain a real-looking `GEMINI_API_KEY`; if valid, rotate it and remove the leaked value.
@@ -185,7 +191,7 @@ The standalone API exposes `/health` and `/api/*` on `http://localhost:4000` by 
 2. Create a private `resumes` storage bucket.
 3. Enable/configure Supabase Auth.
 4. Add Supabase URL, anon key, and service role key to `.env`.
-5. Add Gemini, Google Calendar, Tika, and Resend variables as needed.
+5. Add Gemini, SMTP/Nodemailer, Google Calendar, and Tika variables as needed.
 
 Without these credentials, the app can still run in demo mode with in-memory data and mock external behavior.
 
@@ -213,9 +219,10 @@ Without these credentials, the app can still run in demo mode with in-memory dat
 - `/api/jobs`
 - `/api/matching`
 - `/api/interviews`
+- `/api/emails`
 - `/api/analytics`
 
-Docs mention an emails route, but the scan did not find `server/routes/emails.js`, and `server/server.js` does not mount an emails API.
+Email delivery is handled server-side through `/api/emails/*` routes using Nodemailer with SMTP credentials. The API still runs through the integrated Next.js catch-all route in default deployment mode.
 
 ## Current Notable Local Modifications
 
@@ -245,7 +252,6 @@ No files were modified during the scan itself.
 - Avoid returning stack traces from the global error handler in production.
 - Decide whether `server/lib/openai.js` should be integrated, fixed, or removed. If used, verify its fetch import/runtime compatibility.
 - Fix or confirm the suspicious `email_templates.type` reference in `supabase/schema.sql`.
-- Either implement/mount the documented emails API or remove stale docs mentioning `/api/emails`.
 - Add a real frontend auth guard or route protection strategy for CRM pages if unauthenticated access should be blocked.
 - Rotate any real-looking API keys in `.env.example` and keep examples placeholder-only.
 - Before changing Next.js code, follow `AGENTS.md` and read the relevant Next.js 16 docs under `node_modules/next/dist/docs/`.

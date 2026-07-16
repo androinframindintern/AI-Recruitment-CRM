@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-AI Recruitment CRM is a Next.js 16 + React 19 recruitment dashboard. It is built for resume upload/parsing, candidate pipeline tracking, job creation, AI candidate scoring, interview scheduling, email sending, and analytics.
+AI Recruitment CRM is a Next.js 16 + React 19 recruitment dashboard. It is built for resume upload/parsing, candidate pipeline tracking, job creation, AI candidate scoring, interview scheduling, and analytics.
 
 The app has two main parts:
 
@@ -19,7 +19,7 @@ There is also a Supabase schema in `supabase/schema.sql`.
 - Express `5`
 - Supabase auth/database/storage
 - Gemini API for resume parsing and candidate scoring
-- Resend for recruitment emails
+- Nodemailer/SMTP for server-side shortlist/rejection emails
 - Google Calendar API for interview scheduling
 - Tika server optional for resume text extraction
 
@@ -84,8 +84,13 @@ GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.0-flash
 GEMINI_API_URL=https://generativelanguage.googleapis.com/v1beta
 
-RESEND_API_KEY=
-RESEND_FROM_EMAIL=
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM_EMAIL=
+SMTP_FROM_NAME=AI Recruitment CRM
 
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
@@ -127,7 +132,7 @@ Use `NEXT_PUBLIC_API_URL=http://localhost:4000` in the frontend environment.
 6. For real database mode, run the SQL in `supabase/schema.sql` inside Supabase and create the resume storage bucket, default name `resumes`.
 7. For real auth, enable Supabase email/password auth and provide the public anon key to the frontend.
 8. For real AI parsing/scoring, add `GEMINI_API_KEY`.
-9. For real email delivery, add Resend credentials.
+9. For live shortlist/rejection emails, add SMTP sender credentials for Nodemailer.
 10. For real interview scheduling, add Google Calendar OAuth credentials and a calendar id.
 
 ## Useful Commands

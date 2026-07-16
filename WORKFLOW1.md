@@ -1,6 +1,6 @@
 # AI Recruitment CRM — Comprehensive System Documentation
 
-Welcome to the end-to-end system documentation for the **AI Recruitment CRM**. This application is an advanced, modern Applicant Tracking System (ATS) and customer relationship manager powered by Google Gemini AI, designed to automate resume parsing, candidate scoring, automated email outreach, and interview scheduling.
+Welcome to the end-to-end system documentation for the **AI Recruitment CRM**. This application is an advanced, modern Applicant Tracking System (ATS) and customer relationship manager powered by Google Gemini AI, designed to automate resume parsing, candidate scoring, pipeline coordination, and interview scheduling.
 
 ---
 
@@ -38,7 +38,7 @@ The system is built on a decoupled yet highly integrated architecture, using a N
                             ▼                   ▼               ▼
                      ┌──────────────┐    ┌──────────────┐┌──────────────┐
                      │   Supabase   │    │ Google Gemini││External APIs │
-                     │  PostgreSQL  │    │  Flash API   ││(Resend Email,│
+                     │  PostgreSQL  │    │  Flash API   ││(Google Cal)  │
                      │  + Auth      │    │(Resume Parse ││Google Cal)   │
                      │  + Storage   │    │  & Scoring)  ││              │
                      └──────────────┘    └──────────────┘└──────────────┘q
@@ -55,7 +55,7 @@ To maximize architectural flexibility, the system supports two API routing optio
 3. **Structured Storage:** Gemini structures the resume into JSON format (containing name, skills, experience, education). The database writes these details to the `candidates` and `candidate_resumes` tables, and stores the raw file in Supabase Storage.
 4. **Job Matching & AI Scoring:** The recruiter initiates a score matching request against a job description. Gemini calculates a 0-100 score, lists missing/matched skills, and explains the rating.
 5. **Pipeline Progression:** Recruiter drags the candidate to the "Shortlisted" or "Interview" stage.
-6. **Outreach & Scheduling:** The recruiter emails the candidate (via Resend) or schedules a calendar event synced with Google Calendar.
+6. **Follow-up & Scheduling:** The recruiter updates the pipeline, records notes, and schedules calendar events synced with Google Calendar.
 
 ---
 
@@ -245,9 +245,9 @@ erDiagram
 * **Semantic Vector Search**: Uses the [faiss.js](file:///C:/Users/andro/Ai-Recruitment-CRM/server/lib/faiss.js) helper to compare candidate skills with job description requirements to determine keyword similarity.
 * **Gemini Assessment**: Gemini evaluates candidate experience against job requirements, outputs an aggregate score, and generates a structured explanation of strengths and weaknesses.
 
-### C. Automated Email Ingestion (Resend API)
-* Built-in templates in [emails.js](file:///C:/Users/andro/Ai-Recruitment-CRM/server/routes/emails.js) dynamically draft emails using placeholders (e.g., `{{candidate_name}}`).
-* Uses **Resend** to send emails. When a candidate's stage updates, recruiters can trigger updates directly to the candidate.
+### C. Candidate Follow-up Groundwork
+* Candidate contact fields and provider-agnostic email template/log tables are available for future communication workflows.
+* No email delivery provider is currently wired into the active Express API.
 
 ### D. Interview Calendar Sync (Google Calendar API)
 * Uses OAuth 2.0 credentials and Google APIs to dynamically schedule video calls.
@@ -273,7 +273,6 @@ All requests must include the header `Authorization: Bearer <JWT_Token>` when au
 | `/api/candidates/:id/notes`|`POST`| Save recruiter feedback note | `{"note": "Excellent technical interview"}` |
 | `/api/matching/score` | `POST` | Calculate matching score | `{"candidateId": "...", "jobId": "..."}` |
 | `/api/interviews/schedule`|`POST`| Schedule calendar event | `{"candidateId": "...", "start": "...", "end": "..."}` |
-| `/api/emails/send` | `POST` | Email candidate | `{"candidateId": "...", "type": "shortlisted", "to": "..."}` |
 | `/api/analytics/summary`| `GET` | Generate dashboard summary data | — |
 
 ---

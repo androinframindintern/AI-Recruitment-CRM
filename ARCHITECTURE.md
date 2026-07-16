@@ -18,7 +18,7 @@
           ▼              ▼                  ▼
    ┌─────────────┐ ┌──────────┐  ┌────────────────┐
    │  Supabase   │ │  Gemini  │  │ External APIs  │
-   │  (Postgres  │ │  AI API  │  │ Resend + GCal  │
+   │  (Postgres  │ │  AI API  │  │ SMTP + GCal    │
    │  + Auth +   │ │          │  │                │
    │  Storage)   │ └──────────┘  └────────────────┘
    └─────────────┘
@@ -53,15 +53,15 @@ ai-recruitment-crm/
 │   │   ├── jobs.js                 # Job CRUD
 │   │   ├── matching.js             # AI scoring
 │   │   ├── interviews.js           # Calendar scheduling
-│   │   ├── emails.js               # Email automation
+│   │   ├── emails.js               # Nodemailer SMTP email automation
 │   │   └── analytics.js            # Stats & funnel
 │   ├── middleware/
 │   │   └── auth.js                 # JWT verification + requireRole()
 │   ├── lib/
 │   │   ├── supabase.js             # Server Supabase admin client
 │   │   ├── gemini.js               # AI resume parsing + scoring
-│   │   ├── resend.js               # Email sending
 │   │   ├── googleCalendar.js       # Calendar event creation
+│   │   ├── email/                  # EmailService and template rendering
 │   │   ├── tika.js                 # Resume text extraction
 │   │   ├── faiss.js                # Vector similarity (optional)
 │   │   └── demoStore.js            # In-memory demo store

@@ -1,5 +1,6 @@
 'use client';
 
+import { apiGet } from './api';
 import { DEFAULT_TIMEZONE } from './timezones';
 import { isSupabaseConfigured, safeGetSession, supabase } from './supabaseClient';
 
@@ -26,6 +27,7 @@ const DEFAULT_STORE = {
   history: [],
   interviews: [],
   availability: [],
+  emails: [],
   jobs: [],
 };
 
@@ -801,69 +803,134 @@ export async function scheduleInterviewDemo(candidateId, payload) {
   return { interview: data };
 }
 
-export function summarizeRecruitment(candidates, scores, interviews) {
+function dayKey(value) {
+  const date = new Date(value || nowIso());
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
+function mapSeries(map, dateKey = 'date', valueKey = 'count') {
+  return Object.entries(map)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => ({ [dateKey]: key, [valueKey]: value }));
+}
+
+function avg(values) {
+  const numbers = values.map(Number).filter((value) => Number.isFinite(value));
+  return numbers.length ? Math.round(numbers.reduce((sum, value) => sum + value, 0) / numbers.length) : 0;
+}
+
+export function summarizeRecruitment(candidates, scores, interviews, jobs = [], emails = []) {
   const stageCounts = candidates.reduce((acc, candidate) => {
     acc[candidate.stage] = (acc[candidate.stage] || 0) + 1;
     return acc;
   }, {});
 
-  const totalScore = scores.reduce((sum, item) => sum + Number(item.score || 0), 0);
-  const averageScore = scores.length ? Math.round(totalScore / scores.length) : 0;
+  const scoreValues = scores.map((item) => Number(item.score || 0)).filter((score) => Number.isFinite(score));
+  const averageScore = avg(scoreValues);
+  const highScoreIds = [...new Set(scores.filter((item) => Number(item.score || 0) >= 80).map((item) => item.candidate_id).filter(Boolean))];
 
-  const weekly = candidates.reduce((acc, candidate) => {
+  const daily = {};
+  const month = {};
+  candidates.forEach((candidate) => {
+    const day = dayKey(candidate.created_at || nowIso());
+    daily[day] = (daily[day] || 0) + 1;
     const date = new Date(candidate.created_at || nowIso());
-    const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
+    const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+    month[key] = (month[key] || 0) + 1;
+  });
+
+  const funnelBase = Math.max(candidates.length, 1);
+  const funnel = [
+    { id: 'new', stage: 'Applied', count: stageCounts.new || 0 },
+    { id: 'parsed', stage: 'Parsed', count: stageCounts.parsed || 0 },
+    { id: 'screened', stage: 'Screened', count: Math.max(stageCounts.parsed || 0, scores.length) },
+    { id: 'shortlisted', stage: 'Shortlisted', count: stageCounts.shortlisted || 0 },
+    { id: 'interview_scheduled', stage: 'Interview', count: stageCounts.interview_scheduled || 0 },
+    { id: 'selected', stage: 'Selected', count: stageCounts.selected || 0 },
+    { id: 'hired', stage: 'Hired', count: stageCounts.hired || stageCounts.selected || 0 },
+    { id: 'rejected', stage: 'Rejected', count: stageCounts.rejected || 0 },
+  ].map((item, index, all) => {
+    const previous = index ? all[index - 1].count : item.count;
+    return {
+      ...item,
+      conversionRate: previous ? Math.round((item.count / previous) * 100) : 0,
+      overallRate: Math.round((item.count / funnelBase) * 100),
+    };
+  });
+
+  const skillMap = {};
+  candidates.forEach((candidate) => {
+    normalizeArray(candidate.skills).forEach((skill) => {
+      const key = skill.toLowerCase();
+      skillMap[key] = (skillMap[key] || 0) + 1;
+    });
+  });
+
+  const emailStatus = {};
+  const emailType = {};
+  emails.forEach((email) => {
+    emailStatus[email.status || 'sent'] = (emailStatus[email.status || 'sent'] || 0) + 1;
+    emailType[email.type || 'custom'] = (emailType[email.type || 'custom'] || 0) + 1;
+  });
+
+  const sentEmails = emails.filter((email) => email.status === 'sent' || email.status === 'demo').length;
+  const failedEmails = emails.filter((email) => email.status === 'failed').length;
 
   return {
     totals: {
       candidates: candidates.length,
+      parsed: stageCounts.parsed || 0,
       shortlisted: stageCounts.shortlisted || 0,
+      interviewScheduled: stageCounts.interview_scheduled || 0,
       interviews: interviews.length,
+      interviewCount: interviews.length,
       selected: stageCounts.selected || 0,
+      hired: stageCounts.hired || stageCounts.selected || 0,
+      offerAccepted: stageCounts.hired || stageCounts.selected || 0,
       rejected: stageCounts.rejected || 0,
       averageScore,
+      highScoreCandidates: highScoreIds.length,
+      emails: emails.length,
+      emailsSent: sentEmails,
+      emailsFailed: failedEmails,
+      emailSuccessRate: emails.length ? Math.round((sentEmails / emails.length) * 100) : 0,
     },
-    funnel: [
-      { stage: 'New', count: stageCounts.new || 0 },
-      { stage: 'Parsed', count: stageCounts.parsed || 0 },
-      { stage: 'Shortlisted', count: stageCounts.shortlisted || 0 },
-      { stage: 'Interview Scheduled', count: stageCounts.interview_scheduled || 0 },
-      { stage: 'Selected', count: stageCounts.selected || 0 },
-      { stage: 'Rejected', count: stageCounts.rejected || 0 },
-    ],
+    funnel,
+    candidatesByStage: funnel.filter((item) => item.id !== 'hired'),
     scoreDistribution: [
-      { label: '0-40', count: scores.filter((item) => item.score < 40).length },
-      { label: '40-60', count: scores.filter((item) => item.score >= 40 && item.score < 60).length },
-      { label: '60-80', count: scores.filter((item) => item.score >= 60 && item.score < 80).length },
-      { label: '80-100', count: scores.filter((item) => item.score >= 80).length },
+      { label: '0-40', count: scoreValues.filter((item) => item < 40).length },
+      { label: '40-60', count: scoreValues.filter((item) => item >= 40 && item < 60).length },
+      { label: '60-80', count: scoreValues.filter((item) => item >= 60 && item < 80).length },
+      { label: '80-100', count: scoreValues.filter((item) => item >= 80).length },
     ],
-    weeklyTrend: Object.entries(weekly)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, count]) => ({ date, count })),
+    weeklyTrend: mapSeries(daily),
+    dailyApplications: mapSeries(daily),
+    monthlyHiring: mapSeries(month, 'month', 'count'),
+    topSkills: Object.entries(skillMap).map(([skill, count]) => ({ skill, count })).sort((a, b) => b.count - a.count).slice(0, 10),
+    candidatesByJob: jobs.map((job) => ({ jobId: job.id, title: job.title, count: scores.filter((score) => score.job_id === job.id).length, averageScore: avg(scores.filter((score) => score.job_id === job.id).map((score) => score.score)) })).filter((item) => item.count > 0).slice(0, 8),
+    experienceBreakdown: [
+      { label: '0-2 yrs', count: candidates.filter((candidate) => Number(candidate.years_experience || 0) <= 2).length },
+      { label: '3-5 yrs', count: candidates.filter((candidate) => Number(candidate.years_experience || 0) >= 3 && Number(candidate.years_experience || 0) <= 5).length },
+      { label: '6-10 yrs', count: candidates.filter((candidate) => Number(candidate.years_experience || 0) >= 6 && Number(candidate.years_experience || 0) <= 10).length },
+      { label: '10+ yrs', count: candidates.filter((candidate) => Number(candidate.years_experience || 0) > 10).length },
+    ],
+    highScoreCandidates: candidates.filter((candidate) => highScoreIds.includes(candidate.id)).slice(0, 8).map((candidate) => ({ id: candidate.id, name: candidate.full_name || candidate.email || 'Candidate', stage: candidate.stage })),
+    emailByStatus: Object.entries(emailStatus).map(([status, count]) => ({ status, label: status, count })),
+    emailByType: Object.entries(emailType).map(([type, count]) => ({ type, label: type.replace(/_/g, ' '), count })),
+    emailTrend: mapSeries(emails.reduce((acc, email) => {
+      const key = dayKey(email.created_at || email.sent_at);
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {})),
+    recentActivity: [...candidates, ...emails].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).slice(0, 10),
   };
 }
 
 export async function getAnalyticsSummary() {
   if (!requireSupabaseClient()) {
     const store = loadDemoStore();
-    return summarizeRecruitment(store.candidates, store.scores, store.interviews);
+    return summarizeRecruitment(store.candidates, store.scores, store.interviews, store.jobs, store.emails || []);
   }
 
-  const { candidates } = await listCandidates();
-  const candidateIds = candidates.map((candidate) => candidate.id);
-  if (!candidateIds.length) return summarizeRecruitment([], [], []);
-
-  const [scoresRes, interviewsRes] = await Promise.all([
-    supabase.from('candidate_job_scores').select('*').in('candidate_id', candidateIds),
-    supabase.from('interviews').select('*').in('candidate_id', candidateIds),
-  ]);
-
-  if (scoresRes.error || interviewsRes.error) {
-    throw new Error(scoresRes.error?.message || interviewsRes.error?.message || 'Could not load analytics.');
-  }
-
-  return summarizeRecruitment(candidates, (scoresRes.data || []).map(normalizeScore), interviewsRes.data || []);
+  return apiGet('/api/analytics/summary', { auth: true });
 }

@@ -1,4 +1,5 @@
 import AppShell from '../_components/AppShell';
+import EmailTemplateSettingsPanel from '../_components/EmailTemplateSettingsPanel';
 import GoogleCalendarSettingsPanel from '../_components/GoogleCalendarSettingsPanel';
 import SectionCard from '../_components/SectionCard';
 
@@ -36,9 +37,10 @@ const INTEGRATIONS = [
     )
   },
   {
-    service: 'Resend Outreach Mailer',
-    variables: 'RESEND_API_KEY, RESEND_FROM_EMAIL',
-    desc: 'Triggers outreach notification updates directly to candidate email addresses.',
+    service: 'SMTP Email Automation',
+    variables: 'SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM_EMAIL, SMTP_FROM_NAME',
+    desc: 'Sends shortlisted and rejection emails from secure server-side SMTP routes.',
+    badge: 'Server Only',
     icon: (
       <svg className="w-5 h-5 text-pink-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -108,9 +110,10 @@ export default function SettingsPage() {
           </div>
         </SectionCard>
 
-        {/* Right Column: Google Calendar controls and demo guidelines */}
+        {/* Right Column: Google Calendar controls, templates, and demo guidelines */}
         <div className="space-y-6">
           <GoogleCalendarSettingsPanel />
+          <EmailTemplateSettingsPanel />
 
           <SectionCard
             title="Sandbox Mode Policies"
@@ -130,14 +133,6 @@ export default function SettingsPage() {
                 <p>
                   <strong className="text-white font-bold block mb-0.5">Gemini AI Model</strong>
                   Resume parsing can still extract document text, but candidate job scoring requires live Gemini credentials, <code className="text-indigo-300 font-mono">GEMINI_SCORING_ENABLED=true</code>, and available quota. If Gemini is unavailable, scoring shows an AI error instead of a fallback score.
-                </p>
-              </div>
-
-              <div className="flex gap-3">
-                <span className="w-1.5 h-1.5 rounded-full bg-pink-400 mt-2 flex-shrink-0" />
-                <p>
-                  <strong className="text-white font-bold block mb-0.5">Outreach Emails</strong>
-                  Email actions are printed to server console logs and registered as successful demo sends rather than failing.
                 </p>
               </div>
 

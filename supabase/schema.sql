@@ -372,7 +372,14 @@ create table if not exists email_logs (
   created_at          timestamptz not null default now()
 );
 
+alter table email_logs
+  add column if not exists provider text not null default 'nodemailer',
+  add column if not exists sent_at timestamptz;
+
 create index if not exists email_logs_candidate_id_idx on email_logs(candidate_id);
+create index if not exists email_logs_created_at_idx on email_logs(created_at);
+create index if not exists email_logs_status_idx on email_logs(status);
+create index if not exists email_logs_type_idx on email_logs(type);
 
 alter table email_logs enable row level security;
 

@@ -7,6 +7,7 @@ import EmptyState from '../../_components/EmptyState';
 import { PrimaryButton, SecondaryButton, DangerButton } from '../../_components/PrimaryButton';
 import SectionCard from '../../_components/SectionCard';
 import CandidateAvailabilityPanel from '../../_components/CandidateAvailabilityPanel';
+import CandidateEmailPanel from '../../_components/CandidateEmailPanel';
 import ConfirmationModal from '../../_components/ConfirmationModal';
 import InterviewStatusBadge from '../../_components/InterviewStatusBadge';
 import SyncStatusBadge from '../../_components/SyncStatusBadge';
@@ -518,7 +519,7 @@ export default function CandidateDetailPage() {
           </SectionCard>
         </div>
 
-        {/* Right Column: AI Ranking, Outreach tools, Stage tracker */}
+        {/* Right Column: AI ranking, scheduling tools, stage tracker */}
         <div className="space-y-6">
           {/* AI Score evaluator card */}
           <SectionCard 
@@ -639,7 +640,16 @@ export default function CandidateDetailPage() {
             />
           </SectionCard>
 
-          {/* Communication & outreach */}
+          <CandidateEmailPanel
+            candidate={candidate}
+            selectedJobId={selectedJobId}
+            onEmailSent={() => {
+              setFeedback('Email action completed.');
+              queryClient.invalidateQueries({ queryKey: ['candidate-detail', candidateId] });
+            }}
+          />
+
+          {/* Calendar scheduling */}
           <SectionCard
             title="Calendar & Scheduling Workspace"
             description="Coordinate candidate interview events and sync calendar invitations."

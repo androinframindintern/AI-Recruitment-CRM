@@ -6,8 +6,8 @@
 - npm 10+
 - Supabase project (free tier works)
 - Gemini API key (Google AI Studio)
-- Resend account (email)
 - Google Cloud project (Calendar API)
+- SMTP account credentials for live email automation with Nodemailer
 
 ---
 
@@ -64,8 +64,13 @@ npm run server
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-side service role key |
 | `GEMINI_API_KEY` | Yes | Google Gemini API key with available quota |
 | `GEMINI_SCORING_ENABLED` | Yes | Set to `true` to allow model-backed candidate scoring. If Gemini is unavailable, scoring returns an AI error instead of a fallback score. |
-| `RESEND_API_KEY` | Optional | Email sending |
-| `RESEND_FROM_EMAIL` | Optional | Verified sender email |
+| `SMTP_HOST` | Optional | SMTP server host for live shortlist/rejection emails |
+| `SMTP_PORT` | Optional | SMTP server port, usually `587` |
+| `SMTP_SECURE` | Optional | Set `true` for implicit TLS ports, otherwise `false` |
+| `SMTP_USER` | Optional | SMTP username |
+| `SMTP_PASS` | Optional | SMTP password or app password |
+| `SMTP_FROM_EMAIL` | Optional | Sender email address |
+| `SMTP_FROM_NAME` | Optional | Sender display name |
 | `GOOGLE_CLIENT_ID` | Optional | Google Calendar OAuth client |
 | `GOOGLE_CLIENT_SECRET` | Optional | Google Calendar OAuth secret |
 | `GOOGLE_REFRESH_TOKEN` | Optional | Pre-authorized refresh token |

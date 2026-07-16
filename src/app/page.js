@@ -41,7 +41,7 @@ export default function Home() {
           </h1>
 
           <p className="mt-8 text-base sm:text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed animate-fade-in-up" style={{ animationDelay: '100ms' }}>
-            A powerful, intelligent ATS workspace. Parse resumes, perform instant semantic matching against jobs with Google Gemini AI, track candidates on a Kanban board, and automate recruiter outreach.
+            A powerful, intelligent ATS workspace. Parse resumes, perform instant semantic matching against jobs with Google Gemini AI, track candidates on a Kanban board, and coordinate recruiter follow-up.
           </p>
 
           {/* CTA Group */}
@@ -89,7 +89,7 @@ export default function Home() {
             },
             {
               title: 'Hiring Automation',
-              description: 'Coordinate applicant stages visually. Draft auto-outreach messages, sync calendars, and log feedback notes smoothly.',
+              description: 'Coordinate applicant stages visually. Sync calendars, track next steps, and log feedback notes smoothly.',
               icon: (
                 <svg className="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
