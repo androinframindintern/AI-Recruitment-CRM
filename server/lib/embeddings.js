@@ -43,8 +43,10 @@ export function buildJobEmbeddingText(job) {
   return [
     `Job Title: ${cleanText(job?.title)}`,
     `Department: ${cleanText(job?.department)}`,
+    `Category: ${cleanText(job?.category)}`,
     `Location: ${cleanText(job?.location)}`,
     `Type: ${cleanText(job?.job_type)}`,
+    `Work Mode: ${cleanText(job?.work_mode)}`,
     `Description: ${cleanText(job?.description)}`,
     formatList('Requirements', job?.requirements),
   ].filter((part) => cleanText(part)).join('\n\n').slice(0, 12000);

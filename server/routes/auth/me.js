@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../../middleware/auth.js';
+import { ACCOUNT_ROLES, normalizeRole, profileRole, requireAuth } from '../../middleware/auth.js';
 import { supabaseAdmin, supabaseConfigured } from '../../lib/supabase.js';
 
 const router = Router();
@@ -44,27 +44,32 @@ router.get('/', requireAuth, async (req, res) => {
 
   // Upsert if not found (first login after trigger might race)
   if (!profile) {
+    const metadataRole = req.user.user_metadata?.role;
+    const safeRole = metadataRole === 'recruiter' ? 'recruiter' : 'candidate';
     const { data: upserted } = await supabaseAdmin
       .from('profiles')
       .upsert({
         id: req.user.id,
         email: req.user.email,
         full_name: req.user.user_metadata?.full_name || '',
-        role: req.user.user_metadata?.role || 'recruiter',
+        role: safeRole,
       }, { onConflict: 'id' })
       .select('*')
       .single();
     profile = upserted;
   }
 
-  res.json({
-    profile: profile || {
-      id: req.user.id,
-      email: req.user.email,
-      full_name: req.user.user_metadata?.full_name || '',
-      role: req.user.user_metadata?.role || 'recruiter',
-    },
-  });
+  const normalizedProfile = profile ? {
+    ...profile,
+    role: normalizeRole(profile.role),
+  } : {
+    id: req.user.id,
+    email: req.user.email,
+    full_name: req.user.user_metadata?.full_name || '',
+    role: 'candidate',
+  };
+
+  res.json({ profile: normalizedProfile });
 });
 
 // PATCH /api/me — update current user's profile
@@ -89,8 +94,7 @@ router.patch('/', requireAuth, async (req, res) => {
 
 // GET /api/me/users — admin only: list all users
 router.get('/users', requireAuth, async (req, res) => {
-  const role = req.profile?.role || 'recruiter';
-  if (role !== 'admin') return res.status(403).json({ error: 'Requires admin role' });
+  if (profileRole(req) !== 'admin') return res.status(403).json({ error: 'Requires admin role' });
 
   if (!supabaseConfigured) {
     return res.json({ users: [req.profile] });
@@ -107,12 +111,11 @@ router.get('/users', requireAuth, async (req, res) => {
 
 // PATCH /api/me/users/:id/role — admin only: change a user's role
 router.patch('/users/:id/role', requireAuth, async (req, res) => {
-  const role = req.profile?.role || 'recruiter';
-  if (role !== 'admin') return res.status(403).json({ error: 'Requires admin role' });
+  if (profileRole(req) !== 'admin') return res.status(403).json({ error: 'Requires admin role' });
 
-  const newRole = req.body?.role;
-  if (!['admin', 'recruiter'].includes(newRole)) {
-    return res.status(400).json({ error: 'Invalid role. Must be admin or recruiter' });
+  const newRole = normalizeRole(req.body?.role, '');
+  if (!ACCOUNT_ROLES.includes(newRole)) {
+    return res.status(400).json({ error: 'Invalid role. Must be admin, recruiter, or candidate' });
   }
 
   if (!supabaseConfigured) {

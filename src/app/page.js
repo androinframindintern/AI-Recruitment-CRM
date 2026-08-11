@@ -19,12 +19,20 @@ export default function Home() {
             <span className="text-[10px] text-slate-400 block font-medium">Smart Hiring Suite</span>
           </div>
         </div>
-        <Link 
-          href="/dashboard" 
-          className="btn btn-secondary btn-sm"
-        >
-          Open App
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/careers"
+            className="btn btn-ghost btn-sm"
+          >
+            View Jobs
+          </Link>
+          <Link
+            href="/login"
+            className="btn btn-secondary btn-sm"
+          >
+            Company Login
+          </Link>
+        </div>
       </header>
 
       {/* Hero Body */}
@@ -46,20 +54,20 @@ export default function Home() {
 
           {/* CTA Group */}
           <div className="mt-10 flex flex-wrap justify-center gap-4 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
-            <Link 
-              href="/dashboard" 
+            <Link
+              href="/login"
               className="btn btn-primary btn-lg shadow-xl shadow-indigo-600/30 font-semibold"
             >
-              Get Started Free
+              Company account
               <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
               </svg>
             </Link>
-            <Link 
-              href="/candidates" 
+            <Link
+              href="/careers"
               className="btn btn-secondary btn-lg font-semibold"
             >
-              View Candidate Board
+              Browse Open Jobs
             </Link>
           </div>
         </div>

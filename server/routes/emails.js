@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireCompanyAccount } from '../middleware/auth.js';
 import { createEmailService } from '../lib/email/emailService.js';
 
 const router = Router();
@@ -46,11 +46,11 @@ function sendError(res, error) {
   return res.status(status).json(response);
 }
 
-router.get('/status', requireAuth, async (_req, res) => {
+router.get('/status', requireAuth, requireCompanyAccount, async (_req, res) => {
   res.json(emailService.getStatus());
 });
 
-router.get('/templates', requireAuth, async (req, res) => {
+router.get('/templates', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const type = req.query.type ? String(req.query.type) : undefined;
     if (type && !EMAIL_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid email template type' });
@@ -61,7 +61,7 @@ router.get('/templates', requireAuth, async (req, res) => {
   }
 });
 
-router.patch('/templates/:id', requireAuth, async (req, res) => {
+router.patch('/templates/:id', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const payload = templateUpdateSchema.parse(req.body || {});
     const result = await emailService.updateTemplate(requestContext(req), req.params.id, payload);
@@ -72,7 +72,7 @@ router.patch('/templates/:id', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/preview', requireAuth, async (req, res) => {
+router.post('/preview', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const payload = previewSchema.parse(req.body || {});
     const result = await emailService.previewCandidateEmail(requestContext(req), payload);
@@ -94,10 +94,10 @@ async function sendByType(req, res, type) {
   }
 }
 
-router.post('/shortlist', requireAuth, async (req, res) => sendByType(req, res, 'shortlisted'));
-router.post('/rejection', requireAuth, async (req, res) => sendByType(req, res, 'rejected'));
+router.post('/shortlist', requireAuth, requireCompanyAccount, async (req, res) => sendByType(req, res, 'shortlisted'));
+router.post('/rejection', requireAuth, requireCompanyAccount, async (req, res) => sendByType(req, res, 'rejected'));
 
-router.post('/send', requireAuth, async (req, res) => {
+router.post('/send', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const payload = previewSchema.parse(req.body || {});
     const result = await emailService.sendCandidateEmail(requestContext(req), payload);
@@ -108,7 +108,7 @@ router.post('/send', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/logs', requireAuth, async (req, res) => {
+router.get('/logs', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const candidateId = String(req.query.candidateId || '').trim();
     if (!candidateId) return res.status(400).json({ error: 'candidateId is required' });

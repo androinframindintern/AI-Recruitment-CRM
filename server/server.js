@@ -10,6 +10,7 @@ import meRouter from './routes/auth/me.js';
 import resetRouter from './routes/auth/reset.js';
 import candidatesRouter from './routes/candidates.js';
 import jobsRouter from './routes/jobs.js';
+import careersRouter from './routes/careers.js';
 import matchingRouter from './routes/matching.js';
 import interviewsRouter from './routes/interviews.js';
 import integrationsRouter from './routes/integrations.js';
@@ -53,6 +54,7 @@ export function createApp() {
   app.use('/api/auth/reset', resetRouter);
   app.use('/api/candidates', candidatesRouter);
   app.use('/api/jobs', jobsRouter);
+  app.use('/api/careers', careersRouter);
   app.use('/api/matching', matchingRouter);
   app.use('/api/interviews', interviewsRouter);
   app.use('/api/integrations', integrationsRouter);

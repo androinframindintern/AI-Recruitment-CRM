@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireCompanyAccount } from '../middleware/auth.js';
 import { getDemoStore, nextId } from '../lib/demoStore.js';
 import { supabaseAdmin, supabaseConfigured } from '../lib/supabase.js';
 
@@ -136,7 +136,7 @@ function validateAvailabilityTimes({ startValue, endValue, timezone, allowPast =
   return { startIso: start.toISOString(), endIso: end.toISOString() };
 }
 
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const candidateId = String(req.query.candidateId || '');
     if (!candidateId) return res.status(400).json({ error: 'candidateId is required.' });
@@ -165,7 +165,7 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const parsed = availabilitySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid availability payload.' });
@@ -224,7 +224,7 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
-router.patch('/:id', requireAuth, async (req, res) => {
+router.patch('/:id', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const parsed = availabilityPatchSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid availability update payload.' });
@@ -285,7 +285,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
   }
 });
 
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const existing = await loadAvailabilityForOwner(req.params.id, req.user.id);
     if (!existing) return res.status(404).json({ error: 'Availability slot not found.' });

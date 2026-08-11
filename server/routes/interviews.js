@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireCompanyAccount } from '../middleware/auth.js';
 import {
   classifyGoogleCalendarError,
   createGoogleCalendarEvent,
@@ -542,7 +542,7 @@ async function buildCreatePayload(rawPayload, ownerId) {
   };
 }
 
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const page = Math.max(1, Number(req.query.page || 1));
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 10)));
@@ -614,7 +614,7 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const interview = await loadInterviewForOwner(req.params.id, req.user.id);
     if (!interview) return res.status(404).json({ error: 'Interview not found.' });
@@ -672,10 +672,10 @@ async function createInterview(req, res) {
   }
 }
 
-router.post('/', requireAuth, createInterview);
-router.post('/schedule', requireAuth, createInterview);
+router.post('/', requireAuth, requireCompanyAccount, createInterview);
+router.post('/schedule', requireAuth, requireCompanyAccount, createInterview);
 
-router.patch('/:id', requireAuth, async (req, res) => {
+router.patch('/:id', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const parsed = patchInterviewSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid interview update payload.' });
@@ -759,7 +759,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/:id/cancel', requireAuth, async (req, res) => {
+router.post('/:id/cancel', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const parsed = cancelSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid cancellation payload.' });
@@ -787,7 +787,7 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/:id/sync', requireAuth, async (req, res) => {
+router.post('/:id/sync', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const interview = await loadInterviewForOwner(req.params.id, req.user.id);
     if (!interview) return res.status(404).json({ error: 'Interview not found.' });
@@ -801,7 +801,7 @@ router.post('/:id/sync', requireAuth, async (req, res) => {
   }
 });
 
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const existing = await loadInterviewForOwner(req.params.id, req.user.id);
     if (!existing) return res.status(404).json({ error: 'Interview not found.' });

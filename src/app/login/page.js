@@ -5,6 +5,27 @@ import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabaseClient';
 import { getCurrentProfile } from '@/lib/recruitmentData';
 
+const ACCOUNT_TYPES = [
+  {
+    value: 'candidate',
+    title: 'Normal user / job seeker',
+    detail: 'View public jobs and apply only.',
+  },
+  {
+    value: 'recruiter',
+    title: 'Company / hiring account',
+    detail: 'Manage jobs, candidates, interviews, and CRM workflows.',
+  },
+];
+
+function normalizeRole(role) {
+  return ['admin', 'recruiter', 'candidate'].includes(role) ? role : 'candidate';
+}
+
+function dashboardPathForRole(role) {
+  return normalizeRole(role) === 'candidate' ? '/careers' : '/dashboard';
+}
+
 const FEATURES = [
   {
     icon: (
@@ -89,6 +110,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('demo@recruitcrm.local');
   const [password, setPassword] = useState('demo1234');
   const [fullName, setFullName] = useState('');
+  const [accountType, setAccountType] = useState('candidate');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const router = useRouter();
@@ -99,12 +121,6 @@ export default function LoginPage() {
     setError('');
 
     try {
-      // Demo bypass (only if Supabase is not configured)
-      if (email === 'demo@recruitcrm.local' && !isSupabaseConfigured()) {
-        router.push('/dashboard');
-        return;
-      }
-
       if (mode === 'signin') {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) throw signInError;
@@ -114,16 +130,17 @@ export default function LoginPage() {
           setBusy(false);
           return;
         }
+        const signupRole = accountType === 'recruiter' ? 'recruiter' : 'candidate';
         const { error: signUpError } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { full_name: fullName.trim(), role: 'recruiter' } },
+          options: { data: { full_name: fullName.trim(), role: signupRole } },
         });
         if (signUpError) throw signUpError;
       }
 
-      await getCurrentProfile().catch(() => null);
-      router.push('/dashboard');
+      const profile = await getCurrentProfile().catch(() => null);
+      router.push(dashboardPathForRole(profile?.role));
     } catch (caught) {
       if (mode === 'signin') {
         setError(caught?.message || 'Could not sign in. Please check your email and password.');
@@ -262,20 +279,49 @@ export default function LoginPage() {
             </h2>
             <p className="mt-1 text-sm" style={{ color: '#64748b' }}>
               {mode === 'signin'
-                ? 'Sign in to your recruitment workspace'
-                : 'Start managing your hiring pipeline today'}
+                ? 'Sign in to your account'
+                : 'Choose a normal user or company account'}
             </p>
 
             <form onSubmit={handleSubmit} className="mt-7 space-y-4" id="auth-form">
               {mode === 'signup' && (
-                <FormField
-                  id="full-name"
-                  label="Full name"
-                  value={fullName}
-                  onChange={setFullName}
-                  placeholder="Jane Recruiter"
-                  autoComplete="name"
-                />
+                <>
+                  <FormField
+                    id="full-name"
+                    label="Full name"
+                    value={fullName}
+                    onChange={setFullName}
+                    placeholder={accountType === 'recruiter' ? 'Jane Recruiter' : 'Alex Applicant'}
+                    autoComplete="name"
+                  />
+
+                  <div>
+                    <p className="form-label">Account type</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {ACCOUNT_TYPES.map((type) => {
+                        const active = accountType === type.value;
+                        return (
+                          <button
+                            key={type.value}
+                            type="button"
+                            onClick={() => setAccountType(type.value)}
+                            className="rounded-2xl p-4 text-left transition-all"
+                            style={{
+                              background: active ? 'rgba(99,102,241,0.16)' : 'rgba(255,255,255,0.035)',
+                              border: active ? '1px solid rgba(129,140,248,0.55)' : '1px solid rgba(255,255,255,0.08)',
+                              color: active ? '#c7d2fe' : '#94a3b8',
+                            }}
+                          >
+                            <span className="block text-sm font-semibold text-white">{type.title}</span>
+                            <span className="mt-1 block text-xs leading-5" style={{ color: active ? '#a5b4fc' : '#64748b' }}>
+                              {type.detail}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
               )}
               <FormField
                 id="email"
@@ -333,7 +379,7 @@ export default function LoginPage() {
                     <span className="animate-spin inline-block w-4 h-4 rounded-full border-2 border-white/30 border-t-white" />
                     Please wait…
                   </span>
-                ) : mode === 'signin' ? 'Continue to dashboard →' : 'Create account →'}
+                ) : mode === 'signin' ? 'Continue →' : 'Create account →'}
               </button>
             </form>
           </div>

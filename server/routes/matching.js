@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireCompanyAccount } from '../middleware/auth.js';
 import { scoreCandidateMatch } from '../lib/gemini.js';
 import { cosineSimilarity, ensureCandidateEmbedding, ensureJobEmbedding, EMBEDDING_MODEL } from '../lib/embeddings.js';
 import { getDemoStore, nextId } from '../lib/demoStore.js';
@@ -175,7 +175,7 @@ async function tryEnsureCandidateEmbedding(candidate, resume) {
   }
 }
 
-router.post('/embeddings/backfill', requireAuth, async (req, res) => {
+router.post('/embeddings/backfill', requireAuth, requireCompanyAccount, async (req, res) => {
   const parsed = backfillSchema.safeParse(req.body || {});
   if (!parsed.success) return res.status(400).json({ error: 'Invalid backfill payload' });
   const options = parsed.data;
@@ -260,7 +260,7 @@ router.post('/embeddings/backfill', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/jobs/:jobId/candidates', requireAuth, async (req, res) => {
+router.post('/jobs/:jobId/candidates', requireAuth, requireCompanyAccount, async (req, res) => {
   const parsed = rankSchema.safeParse(req.body || {});
   if (!parsed.success) return res.status(400).json({ error: 'Invalid ranking payload' });
 
@@ -373,7 +373,7 @@ router.post('/jobs/:jobId/candidates', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/score', requireAuth, async (req, res) => {
+router.post('/score', requireAuth, requireCompanyAccount, async (req, res) => {
   const parsed = scoreSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Invalid score payload' });
 

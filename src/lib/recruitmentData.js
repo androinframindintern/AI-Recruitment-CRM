@@ -1,6 +1,6 @@
 'use client';
 
-import { apiGet } from './api';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostForm } from './api';
 import { DEFAULT_TIMEZONE } from './timezones';
 import { isSupabaseConfigured, safeGetSession, supabase } from './supabaseClient';
 
@@ -16,8 +16,27 @@ const DEMO_PROFILE = {
   role: 'recruiter',
 };
 
+function demoProfileFromUser(user = DEMO_USER) {
+  return {
+    id: user.id || DEMO_USER.id,
+    email: user.email || DEMO_USER.email,
+    full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || DEMO_PROFILE.full_name,
+    role: normalizePublicSignupRole(user.user_metadata?.role || DEMO_PROFILE.role),
+  };
+}
+
 const DEMO_STORE_KEY = 'ai-recruitment-crm-frontend-demo-store-v1';
 const DEMO_SCORING_METHOD = 'client_demo';
+const ACCOUNT_ROLES = ['admin', 'recruiter', 'candidate'];
+const PUBLIC_SIGNUP_ROLES = ['recruiter', 'candidate'];
+
+function normalizeAccountRole(role, fallback = 'candidate') {
+  return ACCOUNT_ROLES.includes(role) ? role : fallback;
+}
+
+function normalizePublicSignupRole(role) {
+  return PUBLIC_SIGNUP_ROLES.includes(role) ? role : 'candidate';
+}
 
 const DEFAULT_STORE = {
   candidates: [],
@@ -29,6 +48,7 @@ const DEFAULT_STORE = {
   availability: [],
   emails: [],
   jobs: [],
+  jobApplications: [],
 };
 
 function nowIso() {
@@ -117,15 +137,81 @@ function normalizeScore(score) {
 }
 
 function normalizeJob(job = {}) {
+  const status = job.status || (job.is_active === false ? 'closed' : 'published');
   return {
     ...job,
     requirements: normalizeArray(job.requirements),
-    is_active: job.is_active !== false,
+    status,
+    category: job.category || job.department || '',
+    work_mode: job.work_mode || 'on-site',
+    salary_currency: job.salary_currency || 'USD',
+    show_salary_publicly: job.show_salary_publicly === true,
+    is_active: status === 'published',
+    public_url: job.slug ? `/careers/${job.slug}` : '',
   };
 }
 
 function sortNewest(items) {
   return [...items].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+}
+
+function buildQuery(params = {}) {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '' || value === 'all') return;
+    searchParams.set(key, String(value));
+  });
+  const query = searchParams.toString();
+  return query ? `?${query}` : '';
+}
+
+function toNullableNumber(value) {
+  if (value === '' || value === undefined || value === null) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeJobPayload(payload = {}) {
+  const normalized = {
+    title: String(payload.title || '').trim(),
+    department: String(payload.department || '').trim(),
+    category: String(payload.category || payload.department || '').trim(),
+    location: String(payload.location || '').trim(),
+    job_type: payload.job_type || 'full-time',
+    work_mode: payload.work_mode || 'on-site',
+    description: String(payload.description || '').trim(),
+    requirements: normalizeArray(payload.requirements),
+    salary_min: toNullableNumber(payload.salary_min),
+    salary_max: toNullableNumber(payload.salary_max),
+    salary_currency: String(payload.salary_currency || 'USD').trim().toUpperCase(),
+    show_salary_publicly: payload.show_salary_publicly === true || payload.show_salary_publicly === 'true',
+    application_deadline: payload.application_deadline || null,
+    status: payload.status || 'draft',
+  };
+
+  if (payload.is_active !== undefined && payload.status === undefined) {
+    normalized.status = payload.is_active ? 'published' : 'closed';
+  }
+
+  return normalized;
+}
+
+function normalizeJobPatchPayload(payload = {}) {
+  const normalized = { ...payload };
+  if (Object.hasOwn(payload, 'title')) normalized.title = String(payload.title || '').trim();
+  if (Object.hasOwn(payload, 'department')) normalized.department = String(payload.department || '').trim();
+  if (Object.hasOwn(payload, 'category')) normalized.category = String(payload.category || '').trim();
+  if (Object.hasOwn(payload, 'location')) normalized.location = String(payload.location || '').trim();
+  if (Object.hasOwn(payload, 'description')) normalized.description = String(payload.description || '').trim();
+  if (Object.hasOwn(payload, 'requirements')) normalized.requirements = normalizeArray(payload.requirements);
+  if (Object.hasOwn(payload, 'salary_min')) normalized.salary_min = toNullableNumber(payload.salary_min);
+  if (Object.hasOwn(payload, 'salary_max')) normalized.salary_max = toNullableNumber(payload.salary_max);
+  if (Object.hasOwn(payload, 'salary_currency')) normalized.salary_currency = String(payload.salary_currency || 'USD').trim().toUpperCase();
+  if (Object.hasOwn(payload, 'show_salary_publicly')) normalized.show_salary_publicly = payload.show_salary_publicly === true || payload.show_salary_publicly === 'true';
+  if (Object.hasOwn(payload, 'application_deadline')) normalized.application_deadline = payload.application_deadline || null;
+  if (Object.hasOwn(payload, 'is_active') && !Object.hasOwn(payload, 'status')) normalized.status = payload.is_active ? 'published' : 'closed';
+  delete normalized.is_active;
+  return normalized;
 }
 
 function requireSupabaseClient() {
@@ -135,11 +221,10 @@ function requireSupabaseClient() {
 }
 
 export async function getActiveUser() {
-  if (!isSupabaseConfigured()) return DEMO_USER;
-
   const { data, error } = await safeGetSession();
-  if (error) throw new Error(error.message || 'Could not read Supabase session.');
+  if (error && isSupabaseConfigured()) throw new Error(error.message || 'Could not read Supabase session.');
   const user = data?.session?.user;
+  if (!isSupabaseConfigured()) return user || DEMO_USER;
   if (!user) throw new Error('Please sign in to continue.');
   return user;
 }
@@ -148,8 +233,8 @@ function profilePayloadFromUser(user) {
   return {
     id: user.id,
     email: user.email || '',
-    full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Recruiter',
-    role: 'recruiter',
+    full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Job Seeker',
+    role: normalizePublicSignupRole(user.user_metadata?.role),
   };
 }
 
@@ -158,12 +243,14 @@ async function ensureProfileWithRpc(user) {
   if (error) {
     throw new Error(`Account profile is missing in Supabase. Run the ensure_my_profile SQL patch once, then sign in again. Supabase said: ${error.message}`);
   }
-  return data || profilePayloadFromUser(user);
+  const profile = data || profilePayloadFromUser(user);
+  return { ...profile, role: normalizeAccountRole(profile.role) };
 }
 
 export async function getCurrentProfile(userArg = null) {
   const user = userArg || await getActiveUser();
-  if (!requireSupabaseClient() || user.id === DEMO_USER.id) return DEMO_PROFILE;
+  if (!requireSupabaseClient()) return demoProfileFromUser(user);
+  if (user.id === DEMO_USER.id) return DEMO_PROFILE;
 
   const { data, error } = await supabase
     .from('profiles')
@@ -172,14 +259,15 @@ export async function getCurrentProfile(userArg = null) {
     .maybeSingle();
 
   if (error) throw new Error(error.message || 'Could not load profile.');
-  if (data) return data;
+  if (data) return { ...data, role: normalizeAccountRole(data.role) };
 
   return ensureProfileWithRpc(user);
 }
 
 async function ensureCurrentProfile(userArg = null) {
   const user = userArg || await getActiveUser();
-  if (!requireSupabaseClient() || user.id === DEMO_USER.id) return DEMO_PROFILE;
+  if (!requireSupabaseClient()) return demoProfileFromUser(user);
+  if (user.id === DEMO_USER.id) return DEMO_PROFILE;
 
   const profile = await getCurrentProfile(user);
   const { data } = await supabase
@@ -195,109 +283,107 @@ async function ensureCurrentProfile(userArg = null) {
   return profile;
 }
 
-export async function listJobs() {
-  const user = await getActiveUser();
-
+export async function listJobs(filters = {}) {
   if (!requireSupabaseClient()) {
     const store = loadDemoStore();
-    return { jobs: sortNewest(store.jobs).map(normalizeJob) };
+    const jobs = sortNewest(store.jobs).map(normalizeJob);
+    return { jobs };
   }
 
-  const { data, error } = await supabase
-    .from('jobs')
-    .select('*')
-    .eq('owner_id', user.id)
-    .order('created_at', { ascending: false });
-
-  if (error) throw new Error(error.message || 'Could not load jobs.');
-  return { jobs: (data || []).map(normalizeJob) };
+  const data = await apiGet(`/api/jobs${buildQuery(filters)}`, { auth: true });
+  return { ...data, jobs: (data.jobs || []).map(normalizeJob) };
 }
 
 export async function createJob(payload) {
   const user = await getActiveUser();
   await ensureCurrentProfile(user);
-  const jobPayload = {
-    title: String(payload.title || '').trim(),
-    department: String(payload.department || '').trim(),
-    location: String(payload.location || '').trim(),
-    description: String(payload.description || '').trim(),
-    requirements: normalizeArray(payload.requirements),
-    owner_id: user.id,
-  };
+  const jobPayload = normalizeJobPayload(payload);
 
   if (!jobPayload.title || !jobPayload.description) {
     throw new Error('Job title and description are required.');
   }
+  if (jobPayload.salary_min != null && jobPayload.salary_max != null && jobPayload.salary_min > jobPayload.salary_max) {
+    throw new Error('Minimum salary cannot be greater than maximum salary.');
+  }
 
   if (!requireSupabaseClient()) {
     const store = loadDemoStore();
+    const createdAt = nowIso();
     const job = normalizeJob({
       id: createId('job'),
+      owner_id: user.id,
       ...jobPayload,
-      is_active: true,
-      created_at: nowIso(),
-      updated_at: nowIso(),
+      slug: `${jobPayload.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'job'}-${Date.now()}`,
+      is_active: jobPayload.status === 'published',
+      published_at: jobPayload.status === 'published' ? createdAt : null,
+      closed_at: jobPayload.status === 'closed' ? createdAt : null,
+      created_at: createdAt,
+      updated_at: createdAt,
     });
     store.jobs.unshift(job);
     saveDemoStore(store);
     return { job };
   }
 
-  const { data, error } = await supabase
-    .from('jobs')
-    .insert(jobPayload)
-    .select('*')
-    .single();
-
-  if (error) throw new Error(error.message || 'Could not create job.');
-  return { job: normalizeJob(data) };
+  const data = await apiPost('/api/jobs', jobPayload, { auth: true });
+  return { ...data, job: normalizeJob(data.job) };
 }
 
 export async function updateJob(id, payload) {
-  const user = await getActiveUser();
-  const updates = { ...payload };
-  if (updates.requirements !== undefined) updates.requirements = normalizeArray(updates.requirements);
+  const updates = normalizeJobPatchPayload(payload);
+  if (updates.salary_min != null && updates.salary_max != null && updates.salary_min > updates.salary_max) {
+    throw new Error('Minimum salary cannot be greater than maximum salary.');
+  }
 
   if (!requireSupabaseClient()) {
     const store = loadDemoStore();
     const index = store.jobs.findIndex((job) => job.id === id);
     if (index === -1) throw new Error('Job not found.');
-    store.jobs[index] = normalizeJob({ ...store.jobs[index], ...updates, updated_at: nowIso() });
+    const previous = normalizeJob(store.jobs[index]);
+    const status = updates.status || previous.status;
+    const updatedAt = nowIso();
+    store.jobs[index] = normalizeJob({
+      ...previous,
+      ...updates,
+      is_active: status === 'published',
+      status,
+      published_at: status === 'published' ? (previous.published_at || updatedAt) : previous.published_at,
+      closed_at: status === 'closed' ? updatedAt : null,
+      updated_at: updatedAt,
+    });
     saveDemoStore(store);
     return { job: store.jobs[index] };
   }
 
-  const { data, error } = await supabase
-    .from('jobs')
-    .update(updates)
-    .eq('id', id)
-    .eq('owner_id', user.id)
-    .select('*')
-    .single();
-
-  if (error) throw new Error(error.message || 'Could not update job.');
-  return { job: normalizeJob(data) };
+  const data = await apiPatch(`/api/jobs/${id}`, updates, { auth: true });
+  return { ...data, job: normalizeJob(data.job) };
 }
 
 export async function deleteJob(id) {
-  const user = await getActiveUser();
-
   if (!requireSupabaseClient()) {
     const store = loadDemoStore();
     store.jobs = store.jobs.filter((job) => job.id !== id);
     store.scores = store.scores.filter((score) => score.job_id !== id);
+    store.jobApplications = (store.jobApplications || []).filter((application) => application.job_id !== id);
     saveDemoStore(store);
     return { success: true };
   }
 
-  const { error } = await supabase
-    .from('jobs')
-    .delete()
-    .eq('id', id)
-    .eq('owner_id', user.id);
+  return apiDelete(`/api/jobs/${id}`, { auth: true });
+}
 
-  if (error) throw new Error(error.message || 'Could not delete job.');
-  return { success: true };
+export async function listPublicJobs(filters = {}) {
+  const data = await apiGet(`/api/careers${buildQuery(filters)}`, { auth: false });
+  return { ...data, jobs: (data.jobs || []).map(normalizeJob) };
+}
+
+export async function getPublicJob(slug) {
+  const data = await apiGet(`/api/careers/${encodeURIComponent(slug)}`, { auth: false });
+  return { ...data, job: normalizeJob(data.job) };
+}
+
+export async function submitPublicApplication(slug, formData) {
+  return apiPostForm(`/api/careers/${encodeURIComponent(slug)}/apply`, formData, { auth: false });
 }
 
 export async function listCandidates() {
@@ -720,27 +806,42 @@ export async function scoreCandidateDemo({ candidateId, jobId, title, descriptio
   return { score, job };
 }
 
-export async function rankCandidatesForJobDemo(jobId, { limit = 50 } = {}) {
-  const { jobs } = await listJobs();
-  const job = jobs.find((item) => item.id === jobId);
-  if (!job) throw new Error('Job not found.');
+export async function rankCandidatesForJob(jobId, { limit = 50, minSimilarity = 0, backfillMissing = true } = {}) {
+  if (!requireSupabaseClient()) {
+    const { jobs } = await listJobs();
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job) throw new Error('Job not found.');
 
-  const { candidates } = await listCandidates();
-  const matches = [];
+    const { candidates } = await listCandidates();
+    const matches = [];
 
-  for (const candidate of candidates.slice(0, limit)) {
-    const scoreData = calculateDemoScore(candidate, job);
-    const score = await saveScore(candidate, job, scoreData);
-    matches.push({
-      candidate,
-      score,
-      similarity: score.score / 100,
-    });
+    for (const candidate of candidates.slice(0, limit)) {
+      const scoreData = calculateDemoScore(candidate, job);
+      const score = await saveScore(candidate, job, scoreData);
+      matches.push({
+        candidate,
+        score,
+        similarity: score.score / 100,
+      });
+    }
+
+    matches.sort((a, b) => Number(b.score?.score || 0) - Number(a.score?.score || 0));
+    return { job, matches, generated: matches.length };
   }
 
-  matches.sort((a, b) => Number(b.score?.score || 0) - Number(a.score?.score || 0));
-  return { matches };
+  const data = await apiPost(`/api/matching/jobs/${jobId}/candidates`, { limit, minSimilarity, backfillMissing }, { auth: true });
+  return {
+    ...data,
+    job: data.job ? normalizeJob(data.job) : null,
+    matches: (data.matches || []).map((match) => ({
+      ...match,
+      candidate: normalizeCandidate(match.candidate),
+      score: normalizeScore(match.score),
+    })),
+  };
 }
+
+export const rankCandidatesForJobDemo = rankCandidatesForJob;
 
 export async function scheduleInterviewDemo(candidateId, payload) {
   const user = await getActiveUser();

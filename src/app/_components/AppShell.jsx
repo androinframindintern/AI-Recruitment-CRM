@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthUser } from '@/lib/useAuthUser';
 import { safeSignOut } from '@/lib/supabaseClient';
 
@@ -81,7 +81,23 @@ const NAV_ITEMS = [
 const ROLE_BADGE = {
   admin:     { cls: 'badge-indigo', label: 'Admin' },
   recruiter: { cls: 'badge-sky',    label: 'Recruiter' },
+  candidate: { cls: 'badge-sky',    label: 'Job Seeker' },
 };
+
+function isCompanyRole(role) {
+  return role === 'admin' || role === 'recruiter';
+}
+
+function LoadingShell() {
+  return (
+    <div className="flex min-h-dvh items-center justify-center" style={{ background: 'var(--bg-base)' }}>
+      <div className="glass-card p-6 text-center">
+        <div className="mx-auto mb-4 animate-spin rounded-full border-2 border-white/20 border-t-indigo-400" style={{ width: 28, height: 28 }} />
+        <p className="text-sm font-semibold text-white">Checking account access…</p>
+      </div>
+    </div>
+  );
+}
 
 function getInitials(name) {
   return (name || 'U')
@@ -237,9 +253,20 @@ function SidebarContent({ pathname, profile, loading, signingOut, onNav, onSignO
 export default function AppShell({ children }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { profile, loading } = useAuthUser();
+  const { user, profile, role, loading } = useAuthUser();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      router.replace('/login');
+      return;
+    }
+    if (!isCompanyRole(role)) router.replace('/careers');
+  }, [loading, role, router, user]);
+
+  if (loading || !user || !isCompanyRole(role)) return <LoadingShell />;
 
   const currentPage = NAV_ITEMS.find(
     (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireCompanyAccount } from '../middleware/auth.js';
 import { getDemoStore } from '../lib/demoStore.js';
 import { supabaseAdmin, supabaseConfigured } from '../lib/supabase.js';
 
@@ -263,7 +263,7 @@ function summarize(candidates = [], scores = [], interviews = [], jobs = [], ema
   };
 }
 
-router.get('/summary', requireAuth, async (req, res) => {
+router.get('/summary', requireAuth, requireCompanyAccount, async (req, res) => {
   if (!supabaseConfigured) {
     const store = getDemoStore();
     return res.json(summarize(store.candidates, store.scores, store.interviews, store.jobs, store.emails, store.stageHistory));

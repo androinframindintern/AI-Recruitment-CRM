@@ -29,8 +29,8 @@ create table if not exists profiles (
   email       text unique,
   full_name   text not null default '',
   avatar_url  text not null default '',
-  role        text not null default 'recruiter'
-                check (role in ('admin', 'recruiter')),
+  role        text not null default 'candidate'
+                check (role in ('admin', 'recruiter', 'candidate')),
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
@@ -43,13 +43,17 @@ create or replace trigger profiles_updated_at
 -- Auto-create profile on new Supabase Auth user
 create or replace function handle_new_user()
 returns trigger language plpgsql security definer as $$
+declare
+  requested_role text;
 begin
+  requested_role := coalesce(new.raw_user_meta_data->>'role', 'candidate');
+
   insert into profiles (id, email, full_name, role)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
-    coalesce(new.raw_user_meta_data->>'role', 'recruiter')
+    case when requested_role = 'recruiter' then 'recruiter' else 'candidate' end
   )
   on conflict (id) do nothing;
   return new;
@@ -63,16 +67,80 @@ create or replace trigger on_auth_user_created
 -- RLS: users can read/update their own profile; admins can read all
 alter table profiles enable row level security;
 
+create or replace function current_profile_role()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select role from profiles where id = auth.uid();
+$$;
+
+create or replace function current_user_is_company()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(current_profile_role() in ('admin', 'recruiter'), false);
+$$;
+
+create or replace function current_user_is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(current_profile_role() = 'admin', false);
+$$;
+
+create or replace function ensure_my_profile()
+returns profiles
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  existing_profile profiles;
+  requested_role text;
+begin
+  select * into existing_profile
+  from profiles
+  where id = auth.uid();
+
+  if found then
+    return existing_profile;
+  end if;
+
+  requested_role := coalesce(auth.jwt()->'user_metadata'->>'role', 'candidate');
+
+  insert into profiles (id, email, full_name, role)
+  values (
+    auth.uid(),
+    coalesce(auth.jwt()->>'email', ''),
+    coalesce(auth.jwt()->'user_metadata'->>'full_name', split_part(coalesce(auth.jwt()->>'email', ''), '@', 1), 'Job Seeker'),
+    case when requested_role = 'recruiter' then 'recruiter' else 'candidate' end
+  )
+  returning * into existing_profile;
+
+  return existing_profile;
+end;
+$$;
+
 create policy "profiles_select_own" on profiles
   for select using (auth.uid() = id);
 
 create policy "profiles_select_admin" on profiles
   for select using (
-    exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'admin')
+    current_user_is_admin()
   );
 
 create policy "profiles_update_own" on profiles
-  for update using (auth.uid() = id);
+  for update using (auth.uid() = id)
+  with check (auth.uid() = id and role = current_profile_role());
 
 -- ============================================================
 -- TABLE: pipeline_stages (lookup / seed data)
@@ -139,21 +207,21 @@ create or replace trigger candidates_updated_at
 alter table candidates enable row level security;
 
 create policy "candidates_select_owner" on candidates
-  for select using (owner_id = auth.uid());
+  for select using (current_user_is_company() and owner_id = auth.uid());
 
 create policy "candidates_select_admin" on candidates
   for select using (
-    exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'admin')
+    current_user_is_admin()
   );
 
 create policy "candidates_insert_auth" on candidates
-  for insert with check (owner_id = auth.uid());
+  for insert with check (current_user_is_company() and owner_id = auth.uid());
 
 create policy "candidates_update_owner" on candidates
-  for update using (owner_id = auth.uid());
+  for update using (current_user_is_company() and owner_id = auth.uid());
 
 create policy "candidates_delete_owner" on candidates
-  for delete using (owner_id = auth.uid());
+  for delete using (current_user_is_company() and owner_id = auth.uid());
 
 -- ============================================================
 -- TABLE: candidate_resumes
@@ -176,37 +244,104 @@ alter table candidate_resumes enable row level security;
 
 create policy "candidate_resumes_select" on candidate_resumes
   for select using (
-    exists (select 1 from candidates c where c.id = candidate_id and c.owner_id = auth.uid())
-    or exists (select 1 from profiles p where p.id = auth.uid() and p.role = 'admin')
+    current_user_is_company()
+    and (
+      exists (select 1 from candidates c where c.id = candidate_id and c.owner_id = auth.uid())
+      or current_user_is_admin()
+    )
   );
 
 create policy "candidate_resumes_insert" on candidate_resumes
   for insert with check (
-    exists (select 1 from candidates c where c.id = candidate_id and c.owner_id = auth.uid())
+    current_user_is_company()
+    and exists (select 1 from candidates c where c.id = candidate_id and c.owner_id = auth.uid())
   );
 
 -- ============================================================
 -- TABLE: jobs
 -- ============================================================
 create table if not exists jobs (
-  id           uuid primary key default gen_random_uuid(),
-  owner_id     uuid not null references profiles(id) on delete cascade,
-  title        text not null,
-  department   text not null default '',
-  location     text not null default '',
-  job_type     text not null default 'full-time'
-                 check (job_type in ('full-time', 'part-time', 'contract', 'internship')),
-  description  text not null,
-  requirements jsonb not null default '[]'::jsonb,
-  salary_min   int,
-  salary_max   int,
-  is_active    boolean not null default true,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
+  id                   uuid primary key default gen_random_uuid(),
+  owner_id             uuid not null references profiles(id) on delete cascade,
+  title                text not null,
+  department           text not null default '',
+  category             text not null default '',
+  location             text not null default '',
+  job_type             text not null default 'full-time'
+                         check (job_type in ('full-time', 'part-time', 'contract', 'internship', 'temporary')),
+  work_mode            text not null default 'on-site'
+                         check (work_mode in ('remote', 'hybrid', 'on-site')),
+  description          text not null,
+  requirements         jsonb not null default '[]'::jsonb,
+  salary_min           int,
+  salary_max           int,
+  salary_currency      text not null default 'USD',
+  show_salary_publicly boolean not null default false,
+  application_deadline timestamptz,
+  status               text not null default 'draft'
+                         check (status in ('draft', 'published', 'closed')),
+  slug                 text unique,
+  published_at         timestamptz,
+  closed_at            timestamptz,
+  is_active            boolean not null default false,
+  created_at           timestamptz not null default now(),
+  updated_at           timestamptz not null default now(),
+  constraint jobs_salary_range_check check (salary_min is null or salary_max is null or salary_min <= salary_max)
 );
 
+alter table jobs
+  add column if not exists category text not null default '',
+  add column if not exists work_mode text not null default 'on-site',
+  add column if not exists salary_currency text not null default 'USD',
+  add column if not exists show_salary_publicly boolean not null default false,
+  add column if not exists application_deadline timestamptz,
+  add column if not exists status text not null default 'draft',
+  add column if not exists slug text,
+  add column if not exists published_at timestamptz,
+  add column if not exists closed_at timestamptz;
+
+alter table jobs drop constraint if exists jobs_job_type_check;
+alter table jobs add constraint jobs_job_type_check
+  check (job_type in ('full-time', 'part-time', 'contract', 'internship', 'temporary'));
+
+alter table jobs drop constraint if exists jobs_work_mode_check;
+alter table jobs add constraint jobs_work_mode_check
+  check (work_mode in ('remote', 'hybrid', 'on-site'));
+
+alter table jobs drop constraint if exists jobs_status_check;
+alter table jobs add constraint jobs_status_check
+  check (status in ('draft', 'published', 'closed'));
+
+alter table jobs drop constraint if exists jobs_salary_range_check;
+alter table jobs add constraint jobs_salary_range_check
+  check (salary_min is null or salary_max is null or salary_min <= salary_max);
+
+alter table jobs drop constraint if exists jobs_slug_key;
+
+update jobs
+set status = case when is_active then 'published' else 'closed' end,
+    published_at = case when is_active and published_at is null then coalesce(created_at, now()) else published_at end,
+    closed_at = case when not is_active and closed_at is null then coalesce(updated_at, now()) else closed_at end
+where status = 'draft' and is_active is not null;
+
+update jobs
+set category = coalesce(nullif(category, ''), department, ''),
+    salary_currency = upper(coalesce(nullif(salary_currency, ''), 'USD'));
+
+update jobs
+set slug = lower(regexp_replace(regexp_replace(title, '[^a-zA-Z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g')) || '-' || left(id::text, 8)
+where slug is null or slug = '';
+
+create unique index if not exists jobs_slug_unique_idx on jobs(slug) where slug is not null;
 create index if not exists jobs_owner_id_idx   on jobs(owner_id);
 create index if not exists jobs_is_active_idx  on jobs(is_active);
+create index if not exists jobs_status_idx on jobs(status);
+create index if not exists jobs_owner_status_idx on jobs(owner_id, status);
+create index if not exists jobs_category_idx on jobs(category);
+create index if not exists jobs_job_type_idx on jobs(job_type);
+create index if not exists jobs_work_mode_idx on jobs(work_mode);
+create index if not exists jobs_application_deadline_idx on jobs(application_deadline);
+create index if not exists jobs_published_at_idx on jobs(published_at desc);
 create index if not exists jobs_created_at_idx on jobs(created_at desc);
 
 create or replace trigger jobs_updated_at
@@ -216,16 +351,78 @@ create or replace trigger jobs_updated_at
 alter table jobs enable row level security;
 
 create policy "jobs_select_auth" on jobs
-  for select using (auth.uid() is not null);
+  for select using (current_user_is_company());
 
 create policy "jobs_insert_auth" on jobs
-  for insert with check (owner_id = auth.uid());
+  for insert with check (current_user_is_company() and owner_id = auth.uid());
 
 create policy "jobs_update_owner" on jobs
-  for update using (owner_id = auth.uid());
+  for update using (current_user_is_company() and owner_id = auth.uid());
 
 create policy "jobs_delete_owner" on jobs
-  for delete using (owner_id = auth.uid());
+  for delete using (current_user_is_company() and owner_id = auth.uid());
+
+-- ============================================================
+-- TABLE: job_applications (public applications linked to ATS candidates)
+-- ============================================================
+create table if not exists job_applications (
+  id              uuid primary key default gen_random_uuid(),
+  owner_id        uuid not null references profiles(id) on delete cascade,
+  job_id          uuid not null references jobs(id) on delete cascade,
+  candidate_id    uuid not null references candidates(id) on delete cascade,
+  source          text not null default 'public_careers',
+  status          text not null default 'submitted'
+                    check (status in ('submitted', 'reviewing', 'withdrawn', 'rejected', 'hired')),
+  cover_letter    text not null default '',
+  applicant_email text not null,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  unique (job_id, applicant_email)
+);
+
+alter table job_applications
+  add column if not exists owner_id uuid references profiles(id) on delete cascade,
+  add column if not exists source text not null default 'public_careers',
+  add column if not exists status text not null default 'submitted',
+  add column if not exists cover_letter text not null default '',
+  add column if not exists applicant_email text,
+  add column if not exists updated_at timestamptz not null default now();
+
+update job_applications
+set owner_id = jobs.owner_id
+from jobs
+where job_applications.job_id = jobs.id
+  and job_applications.owner_id is null;
+
+alter table job_applications alter column owner_id set not null;
+alter table job_applications alter column applicant_email set not null;
+alter table job_applications drop constraint if exists job_applications_status_check;
+alter table job_applications add constraint job_applications_status_check
+  check (status in ('submitted', 'reviewing', 'withdrawn', 'rejected', 'hired'));
+
+create unique index if not exists job_applications_job_email_idx on job_applications(job_id, applicant_email);
+create index if not exists job_applications_owner_id_idx on job_applications(owner_id);
+create index if not exists job_applications_job_id_idx on job_applications(job_id);
+create index if not exists job_applications_candidate_id_idx on job_applications(candidate_id);
+create index if not exists job_applications_created_at_idx on job_applications(created_at desc);
+
+create or replace trigger job_applications_updated_at
+  before update on job_applications
+  for each row execute function set_updated_at();
+
+alter table job_applications enable row level security;
+
+drop policy if exists "job_applications_select_auth" on job_applications;
+create policy "job_applications_select_auth" on job_applications
+  for select using (current_user_is_company());
+
+drop policy if exists "job_applications_insert_owner" on job_applications;
+create policy "job_applications_insert_owner" on job_applications
+  for insert with check (current_user_is_company() and owner_id = auth.uid());
+
+drop policy if exists "job_applications_update_owner" on job_applications;
+create policy "job_applications_update_owner" on job_applications
+  for update using (current_user_is_company() and owner_id = auth.uid());
 
 -- ============================================================
 -- TABLE: candidate_job_scores (AI ranking results)
@@ -265,10 +462,10 @@ create or replace trigger candidate_job_scores_updated_at
 alter table candidate_job_scores enable row level security;
 
 create policy "scores_select_auth" on candidate_job_scores
-  for select using (auth.uid() is not null);
+  for select using (current_user_is_company());
 
 create policy "scores_insert_auth" on candidate_job_scores
-  for insert with check (auth.uid() is not null);
+  for insert with check (current_user_is_company());
 
 -- ============================================================
 -- TABLE: candidate_stage_history
@@ -288,10 +485,10 @@ create index if not exists stage_history_candidate_id_idx on candidate_stage_his
 alter table candidate_stage_history enable row level security;
 
 create policy "stage_history_select_auth" on candidate_stage_history
-  for select using (auth.uid() is not null);
+  for select using (current_user_is_company());
 
 create policy "stage_history_insert_auth" on candidate_stage_history
-  for insert with check (auth.uid() is not null);
+  for insert with check (current_user_is_company());
 
 -- ============================================================
 -- TABLE: candidate_notes
@@ -310,13 +507,13 @@ create index if not exists notes_candidate_id_idx on candidate_notes(candidate_i
 alter table candidate_notes enable row level security;
 
 create policy "notes_select_auth" on candidate_notes
-  for select using (auth.uid() is not null);
+  for select using (current_user_is_company());
 
 create policy "notes_insert_auth" on candidate_notes
-  for insert with check (auth.uid() is not null);
+  for insert with check (current_user_is_company());
 
 create policy "notes_delete_own" on candidate_notes
-  for delete using (created_by = auth.uid());
+  for delete using (current_user_is_company() and created_by = auth.uid());
 
 -- ============================================================
 -- TABLE: interviews
@@ -340,19 +537,157 @@ create table if not exists interviews (
   created_at          timestamptz not null default now()
 );
 
+alter table interviews
+  add column if not exists owner_id uuid references profiles(id) on delete cascade,
+  add column if not exists availability_id uuid,
+  add column if not exists interview_type text not null default 'custom',
+  add column if not exists location text not null default '',
+  add column if not exists meeting_url text not null default '',
+  add column if not exists calendar_provider text not null default 'none',
+  add column if not exists calendar_id text,
+  add column if not exists calendar_event_status text,
+  add column if not exists sync_status text not null default 'not_connected',
+  add column if not exists sync_error text not null default '',
+  add column if not exists last_synced_at timestamptz,
+  add column if not exists cancelled_at timestamptz,
+  add column if not exists cancel_reason text not null default '',
+  add column if not exists updated_at timestamptz not null default now();
+
+update interviews
+set owner_id = coalesce(interviews.owner_id, candidates.owner_id)
+from candidates
+where interviews.candidate_id = candidates.id
+  and interviews.owner_id is null;
+
+alter table interviews alter column owner_id set not null;
+
+alter table interviews drop constraint if exists interviews_interview_type_check;
+alter table interviews add constraint interviews_interview_type_check
+  check (interview_type in ('hr', 'technical', 'final', 'manager', 'custom'));
+
+alter table interviews drop constraint if exists interviews_sync_status_check;
+alter table interviews add constraint interviews_sync_status_check
+  check (sync_status in ('not_connected', 'pending', 'synced', 'failed', 'deleted', 'demo'));
+
 create index if not exists interviews_candidate_id_idx on interviews(candidate_id);
-create index if not exists interviews_start_at_idx     on interviews(start_at);
+create index if not exists interviews_owner_id_idx on interviews(owner_id);
+create index if not exists interviews_job_id_idx on interviews(job_id);
+create index if not exists interviews_start_at_idx on interviews(start_at);
+create index if not exists interviews_sync_status_idx on interviews(sync_status);
+
+create or replace trigger interviews_updated_at
+  before update on interviews
+  for each row execute function set_updated_at();
 
 alter table interviews enable row level security;
 
 create policy "interviews_select_auth" on interviews
-  for select using (auth.uid() is not null);
+  for select using (current_user_is_company());
 
 create policy "interviews_insert_auth" on interviews
-  for insert with check (auth.uid() is not null);
+  for insert with check (current_user_is_company() and owner_id = auth.uid());
 
 create policy "interviews_update_auth" on interviews
-  for update using (auth.uid() is not null);
+  for update using (current_user_is_company() and owner_id = auth.uid());
+
+create policy "interviews_delete_auth" on interviews
+  for delete using (current_user_is_company() and owner_id = auth.uid());
+
+-- ============================================================
+-- TABLE: candidate_availability
+-- ============================================================
+create table if not exists candidate_availability (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references profiles(id) on delete cascade,
+  candidate_id uuid not null references candidates(id) on delete cascade,
+  start_at     timestamptz not null,
+  end_at       timestamptz not null,
+  timezone     text not null default 'UTC',
+  status       text not null default 'available'
+                 check (status in ('available', 'held', 'booked', 'cancelled', 'expired')),
+  source       text not null default 'manual',
+  notes        text not null default '',
+  created_by   uuid references profiles(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  constraint candidate_availability_time_check check (end_at > start_at)
+);
+
+create index if not exists candidate_availability_owner_id_idx on candidate_availability(owner_id);
+create index if not exists candidate_availability_candidate_id_idx on candidate_availability(candidate_id);
+create index if not exists candidate_availability_start_at_idx on candidate_availability(start_at);
+create index if not exists candidate_availability_status_idx on candidate_availability(status);
+
+alter table candidate_availability drop constraint if exists candidate_availability_status_check;
+alter table candidate_availability add constraint candidate_availability_status_check
+  check (status in ('available', 'held', 'booked', 'cancelled', 'expired'));
+
+alter table candidate_availability drop constraint if exists candidate_availability_time_check;
+alter table candidate_availability add constraint candidate_availability_time_check
+  check (end_at > start_at);
+
+create or replace trigger candidate_availability_updated_at
+  before update on candidate_availability
+  for each row execute function set_updated_at();
+
+alter table candidate_availability enable row level security;
+
+create policy "candidate_availability_select_auth" on candidate_availability
+  for select using (current_user_is_company());
+
+create policy "candidate_availability_insert_auth" on candidate_availability
+  for insert with check (current_user_is_company() and owner_id = auth.uid());
+
+create policy "candidate_availability_update_auth" on candidate_availability
+  for update using (current_user_is_company() and owner_id = auth.uid());
+
+create policy "candidate_availability_delete_auth" on candidate_availability
+  for delete using (current_user_is_company() and owner_id = auth.uid());
+
+-- ============================================================
+-- TABLE: google_calendar_connections
+-- ============================================================
+create table if not exists google_calendar_connections (
+  id                       uuid primary key default gen_random_uuid(),
+  owner_id                 uuid not null references profiles(id) on delete cascade,
+  provider                 text not null default 'google',
+  google_account_email     text not null default '',
+  calendar_id              text not null default 'primary',
+  calendar_summary         text not null default 'Primary calendar',
+  refresh_token_ciphertext text not null default '',
+  refresh_token_iv         text not null default '',
+  refresh_token_tag        text not null default '',
+  scopes                   jsonb not null default '[]'::jsonb,
+  connected_at             timestamptz,
+  revoked_at               timestamptz,
+  last_sync_at             timestamptz,
+  sync_status              text not null default 'connected',
+  sync_error               text not null default '',
+  created_at               timestamptz not null default now(),
+  updated_at               timestamptz not null default now(),
+  unique (owner_id, provider)
+);
+
+create index if not exists google_calendar_connections_owner_idx on google_calendar_connections(owner_id);
+create index if not exists google_calendar_connections_provider_idx on google_calendar_connections(provider);
+
+create or replace trigger google_calendar_connections_updated_at
+  before update on google_calendar_connections
+  for each row execute function set_updated_at();
+
+alter table google_calendar_connections enable row level security;
+
+create policy "google_calendar_connections_select_owner" on google_calendar_connections
+  for select using (current_user_is_company() and owner_id = auth.uid());
+
+create policy "google_calendar_connections_insert_owner" on google_calendar_connections
+  for insert with check (current_user_is_company() and owner_id = auth.uid());
+
+create policy "google_calendar_connections_update_owner" on google_calendar_connections
+  for update using (current_user_is_company() and owner_id = auth.uid());
+
+create policy "google_calendar_connections_delete_owner" on google_calendar_connections
+  for delete using (current_user_is_company() and owner_id = auth.uid());
 
 -- ============================================================
 -- TABLE: email_logs
@@ -384,10 +719,10 @@ create index if not exists email_logs_type_idx on email_logs(type);
 alter table email_logs enable row level security;
 
 create policy "email_logs_select_auth" on email_logs
-  for select using (auth.uid() is not null);
+  for select using (current_user_is_company());
 
 create policy "email_logs_insert_auth" on email_logs
-  for insert with check (auth.uid() is not null);
+  for insert with check (current_user_is_company());
 
 -- ============================================================
 -- TABLE: candidate_embeddings (Gemini vector search)
@@ -425,10 +760,10 @@ create or replace trigger candidate_embeddings_updated_at
 alter table candidate_embeddings enable row level security;
 
 create policy "embeddings_select_auth" on candidate_embeddings
-  for select using (auth.uid() is not null);
+  for select using (current_user_is_company());
 
 create policy "embeddings_insert_auth" on candidate_embeddings
-  for insert with check (auth.uid() is not null);
+  for insert with check (current_user_is_company());
 
 -- ============================================================
 -- TABLE: job_embeddings (Gemini vector search)
@@ -466,10 +801,10 @@ create or replace trigger job_embeddings_updated_at
 alter table job_embeddings enable row level security;
 
 create policy "job_embeddings_select_auth" on job_embeddings
-  for select using (auth.uid() is not null);
+  for select using (current_user_is_company());
 
 create policy "job_embeddings_insert_auth" on job_embeddings
-  for insert with check (auth.uid() is not null);
+  for insert with check (current_user_is_company());
 
 create or replace function match_candidates_for_job(
   p_job_id uuid,
@@ -528,13 +863,13 @@ create or replace trigger email_templates_updated_at
 alter table email_templates enable row level security;
 
 create policy "email_templates_select_auth" on email_templates
-  for select using (auth.uid() is not null);
+  for select using (current_user_is_company());
 
 create policy "email_templates_insert_auth" on email_templates
-  for insert with check (auth.uid() is not null);
+  for insert with check (current_user_is_company());
 
 create policy "email_templates_update_auth" on email_templates
-  for update using (auth.uid() is not null);
+  for update using (current_user_is_company());
 
 -- ============================================================
 -- Seed: default email templates

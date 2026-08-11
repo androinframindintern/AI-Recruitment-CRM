@@ -21,6 +21,7 @@ const demoStore = {
   candidates: [],
   resumes: [],
   jobs: [],
+  jobApplications: [],
   scores: [],
   notes: [],
   interviews: [],

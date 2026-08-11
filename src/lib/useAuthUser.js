@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { getCurrentProfile } from './recruitmentData';
-import { canUseSupabaseAuth, safeGetSession, supabase } from './supabaseClient';
+import { safeGetSession, supabase } from './supabaseClient';
 
 const authState = {
   user: null,
@@ -14,6 +14,19 @@ const authState = {
 };
 
 const listeners = new Set();
+const ACCOUNT_ROLES = ['admin', 'recruiter', 'candidate'];
+
+function normalizeRole(role, fallback = 'candidate') {
+  return ACCOUNT_ROLES.includes(role) ? role : fallback;
+}
+
+function normalizeProfile(profile) {
+  if (!profile) return null;
+  return {
+    ...profile,
+    role: normalizeRole(profile.role),
+  };
+}
 
 function snapshot() {
   return {
@@ -32,13 +45,13 @@ function emit() {
 async function loadProfile(user) {
   if (!user) return null;
   try {
-    return await getCurrentProfile(user);
+    return normalizeProfile(await getCurrentProfile(user));
   } catch {
     return {
       id: user.id,
       email: user.email || '',
-      full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Recruiter',
-      role: user.user_metadata?.role || 'recruiter',
+      full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Job Seeker',
+      role: normalizeRole(user.user_metadata?.role),
     };
   }
 }
@@ -57,22 +70,6 @@ async function refreshAuthState({ loading = false } = {}) {
   if (authState.refreshPromise) return authState.refreshPromise;
   authState.refreshPromise = (async () => {
     try {
-      if (!canUseSupabaseAuth()) {
-        authState.user = {
-          id: 'demo-user',
-          email: 'demo@recruitcrm.local',
-        };
-        authState.profile = {
-          id: 'demo-user',
-          email: 'demo@recruitcrm.local',
-          full_name: 'Demo Recruiter',
-          role: 'recruiter',
-        };
-        authState.loading = false;
-        authState.initialized = true;
-        emit();
-        return;
-      }
       const { data } = await safeGetSession();
       await syncSession(data.session ?? null, { loading });
     } catch {

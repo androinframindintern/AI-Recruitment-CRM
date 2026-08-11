@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireCompanyAccount } from '../middleware/auth.js';
 import {
   buildGoogleCalendarAuthUrl,
   classifyGoogleCalendarError,
@@ -96,7 +96,7 @@ async function deleteConnection(ownerId) {
   if (error) throw Object.assign(new Error(error.message), { status: 500 });
 }
 
-router.get('/google-calendar/status', requireAuth, async (req, res) => {
+router.get('/google-calendar/status', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const config = getGoogleCalendarConfigStatus();
     const connection = await loadGoogleCalendarConnection(req.user.id);
@@ -110,7 +110,7 @@ router.get('/google-calendar/status', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/google-calendar/connect', requireAuth, async (req, res) => {
+router.get('/google-calendar/connect', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const url = buildGoogleCalendarAuthUrl({
       ownerId: req.user.id,
@@ -171,7 +171,7 @@ router.get('/google-calendar/oauth2callback', async (req, res) => {
   }
 });
 
-router.get('/google-calendar/calendars', requireAuth, async (req, res) => {
+router.get('/google-calendar/calendars', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const connection = await loadGoogleCalendarConnection(req.user.id);
     if (!connection) return res.status(404).json({ error: 'Google Calendar is not connected.' });
@@ -185,7 +185,7 @@ router.get('/google-calendar/calendars', requireAuth, async (req, res) => {
   }
 });
 
-router.patch('/google-calendar/settings', requireAuth, async (req, res) => {
+router.patch('/google-calendar/settings', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const parsed = settingsSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid Google Calendar settings payload.' });
@@ -223,7 +223,7 @@ router.patch('/google-calendar/settings', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/google-calendar/sync', requireAuth, async (req, res) => {
+router.post('/google-calendar/sync', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const connection = await loadGoogleCalendarConnection(req.user.id);
     if (!connection) return res.status(404).json({ error: 'Google Calendar is not connected.' });
@@ -241,7 +241,7 @@ router.post('/google-calendar/sync', requireAuth, async (req, res) => {
   }
 });
 
-router.delete('/google-calendar', requireAuth, async (req, res) => {
+router.delete('/google-calendar', requireAuth, requireCompanyAccount, async (req, res) => {
   try {
     const connection = await loadGoogleCalendarConnection(req.user.id);
     if (connection) {
