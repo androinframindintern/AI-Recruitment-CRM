@@ -81,6 +81,15 @@ export default function CareerDetailPage() {
               <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-white sm:text-5xl">{job.title}</h1>
               <p className="mt-3 text-base text-slate-400">{job.location || 'Location flexible'}</p>
 
+              <div className="mt-6 flex flex-wrap items-center gap-3">
+                {job.can_apply ? (
+                  <a href="#apply" className="btn btn-primary btn-lg font-bold">Apply Now</a>
+                ) : (
+                  <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-sm font-bold text-amber-100">Applications closed</span>
+                )}
+                <Link href="/careers" className="btn btn-secondary btn-lg">All openings</Link>
+              </div>
+
               <div className="mt-7 grid gap-3 sm:grid-cols-3">
                 <Meta label="Salary" value={salary || 'Not publicly disclosed'} />
                 <Meta label="Deadline" value={deadline || 'No deadline'} />

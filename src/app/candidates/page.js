@@ -9,6 +9,17 @@ import EmptyState from '../_components/EmptyState';
 import { PrimaryButton, SecondaryButton } from '../_components/PrimaryButton';
 import SectionCard from '../_components/SectionCard';
 
+function formatDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatSource(value) {
+  return String(value || 'Unknown').replace(/_/g, ' ');
+}
+
 const STAGES = [
   { id: 'new', label: 'New', color: '#6366f1', badgeCls: 'badge-indigo' },
   { id: 'parsed', label: 'Parsed', color: '#06b6d4', badgeCls: 'badge-sky' },
@@ -359,6 +370,7 @@ export default function CandidatesPage() {
                     {stage.candidates.length ? (
                       stage.candidates.map((candidate) => {
                         const score = candidate.latest_score?.score;
+                        const application = candidate.latest_application;
                         return (
                           <div 
                             key={candidate.id} 
@@ -383,6 +395,15 @@ export default function CandidatesPage() {
                                 <span className="text-xs text-slate-600">—</span>
                               )}
                             </div>
+
+                            {application && (
+                              <div className="mt-3 rounded-lg border border-cyan-400/10 bg-cyan-500/[0.04] p-2 text-[10px] text-slate-400">
+                                <p className="truncate font-bold text-cyan-200">{application.job?.title || 'Applied role'}</p>
+                                <p className="mt-1 truncate capitalize">
+                                  {formatSource(application.source)} · {application.status} · {formatDate(application.created_at)}
+                                </p>
+                              </div>
+                            )}
 
                             {/* Skills Tagline */}
                             <div className="mt-3 flex flex-wrap gap-1">

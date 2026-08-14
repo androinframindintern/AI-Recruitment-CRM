@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
@@ -23,6 +24,17 @@ const STAGE_LABELS = {
   selected: 'Selected',
   rejected: 'Rejected'
 };
+
+function formatDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatSource(value) {
+  return String(value || 'Unknown').replace(/_/g, ' ');
+}
 
 export default function CandidateDetailPage() {
   const params = useParams();
@@ -347,6 +359,8 @@ export default function CandidateDetailPage() {
             <div className="grid gap-4 text-sm sm:grid-cols-2">
               <Info label="Email" value={candidate.email || '—'} />
               <Info label="Phone" value={candidate.phone || '—'} />
+              <Info label="LinkedIn" value={candidate.linkedin_url || '—'} href={candidate.linkedin_url} />
+              <Info label="Portfolio" value={candidate.portfolio_url || '—'} href={candidate.portfolio_url} />
               <Info label="Location" value={candidate.location || '—'} />
               <Info label="Experience" value={candidate.years_experience ? `${candidate.years_experience} Years` : '0 Years'} />
             </div>
@@ -410,8 +424,8 @@ export default function CandidateDetailPage() {
             )}
           </SectionCard>
 
-          <SectionCard 
-            title="Extracted Document Text" 
+          <SectionCard
+            title="Extracted Document Text"
             description="Raw plain text extracted from candidate physical file."
           >
             <div className="max-h-72 overflow-y-auto rounded-xl border border-white/5 bg-[#03050b]/80 p-4 text-xs font-mono leading-relaxed text-slate-400 whitespace-pre-wrap">
@@ -419,7 +433,55 @@ export default function CandidateDetailPage() {
             </div>
           </SectionCard>
 
-          <SectionCard 
+          <SectionCard
+            title="Applications"
+            description="Public career-site submissions linked to this candidate profile."
+          >
+            {(data?.applications || []).length ? (
+              <div className="space-y-3">
+                {data.applications.map((application) => (
+                  <div key={application.id} className="rounded-2xl border border-white/5 bg-white/[0.015] p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-white">
+                          {application.job?.slug ? (
+                            <Link href={`/jobs?job=${application.job.id}`} className="hover:text-cyan-200">
+                              {application.job?.title || 'Applied role'}
+                            </Link>
+                          ) : (
+                            application.job?.title || 'Applied role'
+                          )}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {application.job?.department || 'Job'}{application.job?.location ? ` · ${application.job.location}` : ''}
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-cyan-200">
+                        {application.status || 'submitted'}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 text-xs sm:grid-cols-3">
+                      <ApplicationMeta label="Applied" value={formatDate(application.created_at)} />
+                      <ApplicationMeta label="Source" value={formatSource(application.source)} />
+                      <ApplicationMeta label="Applicant Email" value={application.applicant_email || candidate.email || '—'} />
+                    </div>
+
+                    {application.cover_letter && (
+                      <div className="mt-4 border-t border-white/5 pt-4">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">Cover Letter</p>
+                        <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-slate-300">{application.cover_letter}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-600">No job applications are linked to this candidate yet.</p>
+            )}
+          </SectionCard>
+
+          <SectionCard
             title="Recruiter Notes Feed" 
             description="Record internal evaluation notes and concern feedback."
           >
@@ -822,6 +884,11 @@ export default function CandidateDetailPage() {
                       <span className="mx-2 text-slate-500">→</span>
                       <strong className="text-white font-bold">{STAGE_LABELS[entry.to_stage]}</strong>
                     </p>
+                    {entry.note && (
+                      <p className="mt-2 whitespace-pre-wrap rounded-lg border border-white/5 bg-white/[0.015] p-2 text-xs leading-relaxed text-slate-400">
+                        {entry.note}
+                      </p>
+                    )}
                     <p className="mt-1 text-[9px] text-slate-500 font-semibold uppercase tracking-wider">
                       {new Date(entry.created_at).toLocaleString()}
                     </p>
@@ -870,11 +937,27 @@ function experienceMeta(item = {}) {
   return [dates, item.location].filter(Boolean).join(' · ');
 }
 
-function Info({ label, value }) {
+function Info({ label, value, href = '' }) {
+  const displayValue = value || '—';
   return (
     <div className="rounded-xl border border-white/5 bg-white/[0.012] p-4 hover:bg-white/[0.025] hover:border-white/10 transition-all">
       <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">{label}</p>
-      <p className="mt-1.5 text-sm font-semibold text-white">{value}</p>
+      {href ? (
+        <a href={href} target="_blank" rel="noreferrer" className="mt-1.5 block truncate text-sm font-semibold text-cyan-200 hover:text-cyan-100">
+          {displayValue}
+        </a>
+      ) : (
+        <p className="mt-1.5 text-sm font-semibold text-white">{displayValue}</p>
+      )}
+    </div>
+  );
+}
+
+function ApplicationMeta({ label, value }) {
+  return (
+    <div className="rounded-xl border border-white/5 bg-white/[0.012] p-3">
+      <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-500">{label}</p>
+      <p className="mt-1 truncate font-semibold text-slate-200">{value || '—'}</p>
     </div>
   );
 }

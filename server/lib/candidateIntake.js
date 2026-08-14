@@ -17,6 +17,13 @@ const ALLOWED_RESUME_MIME_TYPES = new Set([
 
 const ALLOWED_RESUME_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'txt']);
 
+const PUBLIC_APPLICATION_RESUME_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
+const PUBLIC_APPLICATION_RESUME_EXTENSIONS = new Set(['pdf', 'docx']);
+
 export function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -42,9 +49,16 @@ function resumeExtension(filename = '') {
   return parts.length > 1 ? parts.pop() : '';
 }
 
-export function validateResumeFile(file) {
+export function validateResumeFile(file, options = {}) {
+  const {
+    allowedExtensions = ALLOWED_RESUME_EXTENSIONS,
+    allowedMimeTypes = ALLOWED_RESUME_MIME_TYPES,
+    typeLabel = 'PDF, DOC, DOCX, or TXT',
+    allowMimeOnly = true,
+  } = options;
+
   if (!file) {
-    const error = new Error('Resume file is required');
+    const error = new Error('Resume file is required.');
     error.status = 400;
     throw error;
   }
@@ -57,11 +71,26 @@ export function validateResumeFile(file) {
 
   const extension = resumeExtension(file.originalname);
   const mimeType = String(file.mimetype || '').toLowerCase();
-  if (!ALLOWED_RESUME_EXTENSIONS.has(extension) && !ALLOWED_RESUME_MIME_TYPES.has(mimeType)) {
-    const error = new Error('Resume must be a PDF, DOC, DOCX, or TXT file.');
+  const hasAllowedExtension = allowedExtensions.has(extension);
+  const hasAllowedMimeType = allowedMimeTypes.has(mimeType);
+  const mimeTypeIsSpecific = Boolean(mimeType) && mimeType !== 'application/octet-stream';
+  const invalidExtension = allowMimeOnly ? !hasAllowedExtension && !hasAllowedMimeType : !hasAllowedExtension;
+  const invalidSpecificMime = !allowMimeOnly && mimeTypeIsSpecific && !hasAllowedMimeType;
+
+  if (invalidExtension || invalidSpecificMime) {
+    const error = new Error(`Resume must be a ${typeLabel} file.`);
     error.status = 400;
     throw error;
   }
+}
+
+export function validatePublicApplicationResumeFile(file) {
+  validateResumeFile(file, {
+    allowedExtensions: PUBLIC_APPLICATION_RESUME_EXTENSIONS,
+    allowedMimeTypes: PUBLIC_APPLICATION_RESUME_MIME_TYPES,
+    typeLabel: 'PDF or DOCX',
+    allowMimeOnly: false,
+  });
 }
 
 function getMissingSchemaColumn(error) {
@@ -106,7 +135,7 @@ async function insertCandidateWithSchemaFallback(candidateInsert) {
   }
 }
 
-async function tryEnsureCandidateEmbedding(candidate, resume) {
+export async function tryEnsureCandidateEmbedding(candidate, resume) {
   try {
     await ensureCandidateEmbedding(candidate, resume);
     return { status: 'ready' };
@@ -141,17 +170,41 @@ function withApplicantOverrides(parsed, applicant = {}) {
   const fullName = String(applicant.full_name || applicant.fullName || '').trim();
   const email = String(applicant.email || '').trim().toLowerCase();
   const phone = String(applicant.phone || '').trim();
+  const linkedinUrl = String(applicant.linkedin_url || '').trim();
+  const portfolioUrl = String(applicant.portfolio_url || '').trim();
 
   return candidateShape({
     ...parsed,
     full_name: fullName || parsed.full_name,
     email: email || parsed.email,
     phone: phone || parsed.phone,
+    linkedin_url: linkedinUrl || parsed.linkedin_url || '',
+    portfolio_url: portfolioUrl || parsed.portfolio_url || '',
   });
 }
 
-export async function processCandidateResumeUpload({ file, ownerId, changedBy = ownerId, applicant = {}, historyNote = '' }) {
-  validateResumeFile(file);
+export function buildCandidateInsert({ parsed, file, ownerId, stage = 'parsed' }) {
+  return {
+    owner_id: ownerId,
+    full_name: parsed.full_name || file.originalname.replace(/\.[^.]+$/, ''),
+    email: parsed.email || '',
+    phone: parsed.phone || '',
+    summary: parsed.summary || '',
+    current_company: parsed.current_company || '',
+    current_title: parsed.current_title || '',
+    years_experience: parseYearsExperience(parsed.years_experience || 0),
+    skills: normalizeArray(parsed.skills),
+    education: normalizeArray(parsed.education),
+    experience: normalizeArray(parsed.experience),
+    location: parsed.location || '',
+    linkedin_url: parsed.linkedin_url || '',
+    portfolio_url: parsed.portfolio_url || '',
+    stage,
+  };
+}
+
+export async function parseCandidateResumeUpload({ file, applicant = {}, validator = validateResumeFile } = {}) {
+  validator(file);
 
   console.log('Extracting text from uploaded file:', file.originalname);
   let text;
@@ -176,25 +229,42 @@ export async function processCandidateResumeUpload({ file, ownerId, changedBy = 
     parsed = fallbackParsedProfile({ text, file });
   }
 
-  parsed = withApplicantOverrides(parsed, applicant);
+  return {
+    parsed: withApplicantOverrides(parsed, applicant),
+    extractedText: text,
+  };
+}
+
+export async function uploadResumeToStorage({ file, candidateId }) {
+  let storagePath = null;
+  try {
+    const bucket = process.env.SUPABASE_RESUME_BUCKET || 'resumes';
+    const safeName = String(file.originalname || 'resume').replace(/[^a-zA-Z0-9._-]/g, '-');
+    const uploadPath = `${candidateId}/${Date.now()}-${safeName}`;
+    console.log(`Uploading file to Supabase Storage in bucket "${bucket}"...`);
+    const { error: storageError } = await supabaseAdmin.storage.from(bucket).upload(uploadPath, file.buffer, {
+      contentType: file.mimetype,
+      upsert: false,
+    });
+    if (!storageError) {
+      storagePath = uploadPath;
+    } else {
+      console.warn('Supabase storage upload failed:', storageError);
+    }
+  } catch (err) {
+    console.error('Supabase storage upload exception:', err);
+  }
+  return storagePath;
+}
+
+export async function processCandidateResumeUpload({ file, ownerId, changedBy = ownerId, applicant = {}, historyNote = '' }) {
+  const { parsed, extractedText: text } = await parseCandidateResumeUpload({ file, applicant });
 
   if (!supabaseConfigured) {
     const store = getDemoStore();
     const candidate = {
       id: nextId('candidate'),
-      owner_id: ownerId,
-      full_name: parsed.full_name || file.originalname.replace(/\.[^.]+$/, ''),
-      email: parsed.email || '',
-      phone: parsed.phone || '',
-      summary: parsed.summary || '',
-      current_company: parsed.current_company || '',
-      current_title: parsed.current_title || '',
-      years_experience: parseYearsExperience(parsed.years_experience || 0),
-      skills: normalizeArray(parsed.skills),
-      education: normalizeArray(parsed.education),
-      experience: normalizeArray(parsed.experience),
-      location: parsed.location || '',
-      stage: 'parsed',
+      ...buildCandidateInsert({ parsed, file, ownerId }),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -226,21 +296,7 @@ export async function processCandidateResumeUpload({ file, ownerId, changedBy = 
     return { candidate, resume, embedding, extractedText: text };
   }
 
-  const candidateInsert = {
-    owner_id: ownerId,
-    full_name: parsed.full_name || file.originalname.replace(/\.[^.]+$/, ''),
-    email: parsed.email || '',
-    phone: parsed.phone || '',
-    summary: parsed.summary || '',
-    current_company: parsed.current_company || '',
-    current_title: parsed.current_title || '',
-    years_experience: parseYearsExperience(parsed.years_experience || 0),
-    skills: normalizeArray(parsed.skills),
-    education: normalizeArray(parsed.education),
-    experience: normalizeArray(parsed.experience),
-    location: parsed.location || '',
-    stage: 'parsed',
-  };
+  const candidateInsert = buildCandidateInsert({ parsed, file, ownerId });
 
   console.log('Inserting candidate record into Supabase...');
   const { data: candidate, error: candidateError } = await insertCandidateWithSchemaFallback(candidateInsert);
@@ -258,24 +314,7 @@ export async function processCandidateResumeUpload({ file, ownerId, changedBy = 
     throw error;
   }
 
-  let storagePath = null;
-  try {
-    const bucket = process.env.SUPABASE_RESUME_BUCKET || 'resumes';
-    const safeName = String(file.originalname || 'resume').replace(/[^a-zA-Z0-9._-]/g, '-');
-    const uploadPath = `${candidate.id}/${Date.now()}-${safeName}`;
-    console.log(`Uploading file to Supabase Storage in bucket "${bucket}"...`);
-    const { error: storageError } = await supabaseAdmin.storage.from(bucket).upload(uploadPath, file.buffer, {
-      contentType: file.mimetype,
-      upsert: false,
-    });
-    if (!storageError) {
-      storagePath = uploadPath;
-    } else {
-      console.warn('Supabase storage upload failed:', storageError);
-    }
-  } catch (err) {
-    console.error('Supabase storage upload exception:', err);
-  }
+  const storagePath = await uploadResumeToStorage({ file, candidateId: candidate.id });
 
   console.log('Inserting resume record into Supabase...');
   const { data: resume, error: resumeError } = await supabaseAdmin

@@ -144,7 +144,7 @@ function JobCard({ job }) {
         {deadline && <Pill>Apply by {deadline}</Pill>}
         {!job.can_apply && <Pill>Applications closed</Pill>}
       </div>
-      <span className="mt-6 inline-flex text-sm font-semibold text-cyan-300">View details →</span>
+      <span className="mt-6 inline-flex text-sm font-semibold text-cyan-300">{job.can_apply ? 'View details & apply →' : 'View details →'}</span>
     </Link>
   );
 }

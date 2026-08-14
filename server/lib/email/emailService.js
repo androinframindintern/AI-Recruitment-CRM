@@ -89,6 +89,22 @@ function dateParts(value) {
   };
 }
 
+function formatApplicationDate(value) {
+  return safeDate(value).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function formatSource(value) {
+  return String(value || 'public_careers')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function buildAtsLink(candidateId) {
+  const path = `/candidates/${candidateId}`;
+  const origin = String(process.env.FRONTEND_ORIGIN || process.env.NEXT_PUBLIC_APP_URL || '').trim().replace(/\/+$/, '');
+  return origin ? `${origin}${path}` : path;
+}
+
 async function insertEmailLogWithFallback(emailLog) {
   const ignoredColumns = new Set();
 
@@ -380,6 +396,133 @@ export class EmailService {
     const { data, error } = await insertEmailLogWithFallback(log);
     if (error) throw httpError(error.message || 'Could not save email log.', 500);
     return sanitizeLog(data);
+  }
+
+  async sendAndLogCustomEmail(ctx, {
+    candidateId,
+    recipientEmail,
+    recipientName = '',
+    subject,
+    body,
+  } = {}) {
+    const preview = {
+      candidateId,
+      recipientEmail: String(recipientEmail || '').trim().toLowerCase(),
+      recipientName: recipientName || recipientEmail || '',
+      type: 'custom',
+      templateId: null,
+      subject: String(subject || '').trim(),
+      body: String(body || '').trim(),
+      html: textToHtml(body),
+    };
+
+    if (!candidateId) throw httpError('Candidate is required before sending.', 422);
+    if (!preview.recipientEmail) throw httpError('Recipient email is required before sending.', 422);
+    if (!preview.subject) throw httpError('Email subject is required.', 422);
+    if (!preview.body) throw httpError('Email body is required.', 422);
+
+    if (!supabaseConfigured) {
+      const emailLog = await this.createLog(ctx, candidateId, preview, 'demo', 'demo-mode');
+      return { preview, emailLog, status: 'demo', message: 'Demo mode: email send simulated.' };
+    }
+
+    try {
+      const result = await this.provider.sendEmail({
+        to: { email: preview.recipientEmail, name: preview.recipientName },
+        subject: preview.subject,
+        textContent: preview.body,
+        htmlContent: preview.html,
+      });
+      const status = result.provider === 'demo' ? 'demo' : 'sent';
+      const emailLog = await this.createLog(ctx, candidateId, preview, status, result.messageId);
+      return {
+        preview,
+        emailLog,
+        status,
+        provider: result.provider,
+        message: result.provider === 'demo' ? 'SMTP not configured: email send simulated.' : undefined,
+      };
+    } catch (error) {
+      const emailLog = await this.createLog(ctx, candidateId, preview, 'failed');
+      throw httpError(error.message || 'Email could not be sent.', error.status || 502, {
+        code: error.details?.code || 'EMAIL_SEND_FAILED',
+        emailLog,
+      });
+    }
+  }
+
+  async sendPublicApplicationNotifications(ctx, {
+    candidate = {},
+    job = {},
+    application = {},
+    applicant = {},
+    recruiter = null,
+  } = {}) {
+    const results = { candidate: 'skipped', recruiter: 'skipped' };
+    const candidateId = candidate.id;
+    const candidateName = candidate.full_name || applicant.full_name || candidate.email || applicant.email || 'Candidate';
+    const candidateEmail = candidate.email || applicant.email || application.applicant_email || '';
+    const jobTitle = job.title || 'the role';
+    const companyName = process.env.COMPANY_NAME || 'our company';
+    const applicationDate = formatApplicationDate(application.created_at || new Date().toISOString());
+    const source = formatSource(application.source || 'public_careers');
+
+    if (candidateEmail) {
+      try {
+        await this.sendAndLogCustomEmail(ctx, {
+          candidateId,
+          recipientEmail: candidateEmail,
+          recipientName: candidateName,
+          subject: `Application Received – ${jobTitle}`,
+          body: `Hi ${candidateName},
+
+Thank you for applying to ${companyName}. We have received your application for the ${jobTitle} position on ${applicationDate}.
+
+Our recruiting team will review your resume and application details in the existing hiring workflow. If your background matches the next stage of the process, we will contact you with next steps.
+
+Thank you for your interest in ${companyName}.
+
+Best regards,
+${companyName} Recruiting Team`,
+        });
+        results.candidate = 'sent';
+      } catch (error) {
+        results.candidate = 'failed';
+        console.warn('Public application candidate confirmation email failed:', error?.message || error);
+      }
+    }
+
+    if (recruiter?.email) {
+      try {
+        await this.sendAndLogCustomEmail(ctx, {
+          candidateId,
+          recipientEmail: recruiter.email,
+          recipientName: recruiter.full_name || recruiter.email,
+          subject: `New Application: ${candidateName} for ${jobTitle}`,
+          body: `Hi ${recruiter.full_name || 'Recruiter'},
+
+A new public career-site application has been submitted.
+
+Candidate: ${candidateName}
+Job: ${jobTitle}
+Email: ${candidateEmail || '—'}
+Phone: ${applicant.phone || candidate.phone || '—'}
+Application date: ${applicationDate}
+Source: ${source}
+ATS profile: ${buildAtsLink(candidateId)}
+
+Please review this candidate in the existing ATS pipeline.`,
+        });
+        results.recruiter = 'sent';
+      } catch (error) {
+        results.recruiter = 'failed';
+        console.warn('Public application recruiter notification email failed:', error?.message || error);
+      }
+    } else {
+      console.warn('Public application recruiter notification skipped: recruiter email not found.');
+    }
+
+    return results;
   }
 
   async sendCandidateEmail(ctx, payload) {

@@ -64,11 +64,19 @@ export function createApp() {
 
   app.use((err, _req, res, _next) => {
     console.error(err);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: err.message,
-      stack: err.stack,
-    });
+
+    const status = Number(err?.status || 500);
+    const safeStatus = status >= 400 && status < 500 ? status : 500;
+    const response = {
+      error: safeStatus === 500 ? 'Internal server error' : 'Request could not be completed.',
+    };
+
+    if (process.env.NODE_ENV !== 'production') {
+      response.message = err?.message;
+      response.stack = err?.stack;
+    }
+
+    res.status(safeStatus).json(response);
   });
 
   return app;

@@ -112,6 +112,10 @@ function normalizeCandidate(candidate = {}) {
     .map(normalizeScore)
     .filter(Boolean)
     .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+  const applications = (candidate.job_applications || candidate.applications || [])
+    .map(normalizeApplication)
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
   return {
     ...candidate,
@@ -120,6 +124,8 @@ function normalizeCandidate(candidate = {}) {
     experience: normalizeStructuredList(candidate.experience),
     tags: normalizeArray(candidate.tags),
     latest_score: candidate.latest_score || jobScores[0] || null,
+    latest_application: candidate.latest_application || applications[0] || null,
+    applications,
     job_scores: jobScores,
     notes_count: Number(candidate.notes_count ?? candidate.candidate_notes?.length ?? 0),
   };
@@ -133,6 +139,17 @@ function normalizeScore(score) {
     skill_match_percent: Math.round(Number(score.skill_match_percent || score.score || 0)),
     matched_skills: normalizeArray(score.matched_skills),
     missing_skills: normalizeArray(score.missing_skills),
+  };
+}
+
+function normalizeApplication(application = {}) {
+  if (!application) return null;
+  const job = application.jobs || application.job || null;
+  return {
+    ...application,
+    job: job ? normalizeJob(job) : null,
+    source: application.source || 'public_careers',
+    status: application.status || 'submitted',
   };
 }
 
@@ -394,6 +411,12 @@ export async function listCandidates() {
     const candidates = sortNewest(store.candidates).map((candidate) => normalizeCandidate({
       ...candidate,
       candidate_job_scores: store.scores.filter((score) => score.candidate_id === candidate.id),
+      job_applications: (store.jobApplications || [])
+        .filter((application) => application.candidate_id === candidate.id)
+        .map((application) => ({
+          ...application,
+          job: store.jobs.find((job) => job.id === application.job_id) || null,
+        })),
       notes_count: store.notes.filter((note) => note.candidate_id === candidate.id).length,
     }));
     return { candidates };
@@ -401,7 +424,7 @@ export async function listCandidates() {
 
   const { data, error } = await supabase
     .from('candidates')
-    .select('*, candidate_job_scores(*), candidate_notes(id)')
+    .select('*, candidate_job_scores(*), candidate_notes(id), job_applications(*, jobs(id,title,slug,department,location))')
     .eq('owner_id', user.id)
     .order('created_at', { ascending: false });
 
@@ -564,9 +587,16 @@ export async function getCandidateDetail(candidateId) {
   if (!requireSupabaseClient()) {
     const store = loadDemoStore();
     const candidate = store.candidates.find((item) => item.id === candidateId);
-    if (!candidate) return { candidate: null, resume: null, notes: [], scores: [], history: [], interviews: [], availability: [] };
+    if (!candidate) return { candidate: null, resume: null, notes: [], scores: [], history: [], interviews: [], availability: [], applications: [] };
+    const applications = sortNewest((store.jobApplications || [])
+      .filter((application) => application.candidate_id === candidateId)
+      .map((application) => ({
+        ...application,
+        job: store.jobs.find((job) => job.id === application.job_id) || null,
+      })))
+      .map(normalizeApplication);
     return {
-      candidate: normalizeCandidate(candidate),
+      candidate: normalizeCandidate({ ...candidate, applications }),
       resume: sortNewest(store.resumes.filter((item) => item.candidate_id === candidateId))[0] || null,
       notes: sortNewest(store.notes.filter((item) => item.candidate_id === candidateId)),
       scores: sortNewest(store.scores.filter((item) => item.candidate_id === candidateId)).map(normalizeScore),
@@ -575,6 +605,7 @@ export async function getCandidateDetail(candidateId) {
       availability: store.availability
         .filter((item) => item.candidate_id === candidateId)
         .sort((a, b) => new Date(a.start_at || 0).getTime() - new Date(b.start_at || 0).getTime()),
+      applications,
     };
   }
 
@@ -586,31 +617,35 @@ export async function getCandidateDetail(candidateId) {
     .maybeSingle();
 
   if (error) throw new Error(error.message || 'Could not load candidate.');
-  if (!candidate) return { candidate: null, resume: null, notes: [], scores: [], history: [], interviews: [], availability: [] };
+  if (!candidate) return { candidate: null, resume: null, notes: [], scores: [], history: [], interviews: [], availability: [], applications: [] };
 
-  const [resumeRes, notesRes, scoresRes, historyRes, interviewsRes, availabilityRes] = await Promise.all([
+  const [resumeRes, notesRes, scoresRes, historyRes, interviewsRes, availabilityRes, applicationsRes] = await Promise.all([
     supabase.from('candidate_resumes').select('*').eq('candidate_id', candidateId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
     supabase.from('candidate_notes').select('*').eq('candidate_id', candidateId).order('created_at', { ascending: false }),
     supabase.from('candidate_job_scores').select('*').eq('candidate_id', candidateId).order('created_at', { ascending: false }),
     supabase.from('candidate_stage_history').select('*').eq('candidate_id', candidateId).order('created_at', { ascending: false }),
     supabase.from('interviews').select('*').eq('candidate_id', candidateId).order('created_at', { ascending: false }),
     supabase.from('candidate_availability').select('*').eq('candidate_id', candidateId).order('start_at', { ascending: true }),
+    supabase.from('job_applications').select('*, jobs(id,title,slug,department,location)').eq('candidate_id', candidateId).eq('owner_id', user.id).order('created_at', { ascending: false }),
   ]);
 
   const safeAvailabilityRes = availabilityRes.error?.message?.toLowerCase().includes('candidate_availability')
     ? { data: [], error: null }
     : availabilityRes;
-  const firstError = [resumeRes, notesRes, scoresRes, historyRes, interviewsRes, safeAvailabilityRes].find((result) => result.error)?.error;
+  const firstError = [resumeRes, notesRes, scoresRes, historyRes, interviewsRes, safeAvailabilityRes, applicationsRes].find((result) => result.error)?.error;
   if (firstError) throw new Error(firstError.message || 'Could not load candidate details.');
 
+  const applications = (applicationsRes.data || []).map(normalizeApplication);
+
   return {
-    candidate: normalizeCandidate(candidate),
+    candidate: normalizeCandidate({ ...candidate, applications }),
     resume: resumeRes.data || null,
     notes: notesRes.data || [],
     scores: (scoresRes.data || []).map(normalizeScore),
     history: historyRes.data || [],
     interviews: interviewsRes.data || [],
     availability: safeAvailabilityRes.data || [],
+    applications,
   };
 }
 
