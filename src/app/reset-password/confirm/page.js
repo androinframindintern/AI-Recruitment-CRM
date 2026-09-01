@@ -22,6 +22,7 @@ function PasswordField({ id, label, value, onChange, placeholder, show, onToggle
         />
         <button
           type="button"
+dasible
           onClick={onToggleShow}
           className="absolute right-3 top-1/2 -translate-y-1/2"
           style={{ color: '#475569', lineHeight: 1 }}
