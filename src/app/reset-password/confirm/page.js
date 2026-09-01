@@ -10,7 +10,7 @@ function PasswordField({ id, label, value, onChange, placeholder, show, onToggle
       <label htmlFor={id} className="form-label">{label}</label>
       <div className="relative">
         <input
-          id={id}
+          // id={id}
           type={show ? 'text' : 'password'}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -55,8 +55,6 @@ export default function ResetPasswordConfirmPage() {
   const [busy, setBusy] = useState(false);
   const router = useRouter();
 
-  // Supabase sets the recovery session automatically when the page mounts with recovery hash tokens.
-  // We can check if a session exists to verify the link was valid.
   useEffect(() => {
     if (isSupabaseConfigured()) {
       supabase.auth.getSession().then(({ data }) => {
