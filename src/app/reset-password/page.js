@@ -9,12 +9,20 @@ export default function ResetPasswordPage() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showPopup, setShowPopup] = useState(false);
 
-  async function handleRequest() {
+  async function handleRequest(e) {
     e.preventDefault();
 
+    // Intentionally prevent reset functionality
+    setShowPopup(true);
+
+    // Auto close popup after 3 seconds
+    setTimeout(() => {
+      setShowPopup(false);
+    }, 3000);
+
     return;
-   
   }
 
   return (
@@ -56,7 +64,6 @@ export default function ResetPasswordPage() {
           </Link>
 
           {sent ? (
-            /* Success state */
             <div className="text-center py-6">
               <div
                 className="mx-auto flex items-center justify-center rounded-full mb-5"
@@ -144,9 +151,7 @@ export default function ResetPasswordPage() {
                 )}
 
                 <button
- type="submit"
-                  disabled
-                  disabled={busy || !email.trim()}
+                  type="submit"
                   className="btn btn-primary w-full"
                 >
                   {busy ? (
@@ -173,6 +178,60 @@ export default function ResetPasswordPage() {
           )}
         </div>
       </div>
+
+      {/* Popup */}
+      {showPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowPopup(false)}
+          />
+
+          <div
+            className="relative w-full max-w-sm rounded-2xl p-6 shadow-2xl"
+            style={{
+              background: 'var(--bg-base)',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            <div className="flex items-start gap-4">
+              <div
+                className="flex items-center justify-center rounded-full shrink-0"
+                style={{
+                  width: 42,
+                  height: 42,
+                  background: 'rgba(245,158,11,0.12)',
+                  border: '1px solid rgba(245,158,11,0.25)',
+                }}
+              >
+                <span className="text-lg">!</span>
+              </div>
+
+              <div>
+                <h2 className="text-base font-semibold text-white">
+                  Reset password unavailable
+                </h2>
+
+                <p
+                  className="mt-1 text-sm"
+                  style={{ color: '#64748b' }}
+                >
+                  Password reset is currently unavailable. Please try
+                  again later.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowPopup(false)}
+                className="ml-auto text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
