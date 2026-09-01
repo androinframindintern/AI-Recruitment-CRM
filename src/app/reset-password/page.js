@@ -79,7 +79,7 @@ export default function ResetPasswordPage() {
               </p>
 
               <form onSubmit={handleRequest} className="mt-7 space-y-4" id="reset-form">
-                // <div>
+                <div>
                 //   <label htmlFor="reset-email" className="form-label">Email address</label>
                 //   <input
                 //     id="reset-email"
@@ -91,7 +91,7 @@ export default function ResetPasswordPage() {
                 //     autoComplete="email"
                 //     className="form-input"
                 //   />
-                // </div>
+                </div>
 
                 {error && (
                   <div className="alert alert-error text-sm">{error}</div>
@@ -100,8 +100,7 @@ export default function ResetPasswordPage() {
                 <button
                   type="submit"
                   id="reset-submit"
-disable
-                  disabled={busy || !email}
+                    disabled
                   className="btn btn-primary w-full"
                 >
                   {busy ? (
