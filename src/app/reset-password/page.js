@@ -171,7 +171,7 @@ export default function ResetPasswordPage() {
                 )}
 
                 <button
-                  type="submit"
+                  
                   id="reset-submit"
 disabled
                   disabled={busy || !email.trim()}
