@@ -10,7 +10,7 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  async function handleRequest(e) {
+  async function handleRequest() {
     e.preventDefault();
 
     if (!email.trim()) {
