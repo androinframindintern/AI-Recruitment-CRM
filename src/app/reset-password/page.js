@@ -79,19 +79,19 @@ export default function ResetPasswordPage() {
               </p>
 
               <form onSubmit={handleRequest} className="mt-7 space-y-4" id="reset-form">
-                <div>
-                  <label htmlFor="reset-email" className="form-label">Email address</label>
-                  <input
-                    id="reset-email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@company.com"
-                    required
-                    autoComplete="email"
-                    className="form-input"
-                  />
-                </div>
+                // <div>
+                //   <label htmlFor="reset-email" className="form-label">Email address</label>
+                //   <input
+                //     id="reset-email"
+                //     type="email"
+                //     value={email}
+                //     onChange={(e) => setEmail(e.target.value)}
+                //     placeholder="you@company.com"
+                //     required
+                //     autoComplete="email"
+                //     className="form-input"
+                //   />
+                // </div>
 
                 {error && (
                   <div className="alert alert-error text-sm">{error}</div>
