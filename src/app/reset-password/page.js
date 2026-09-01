@@ -13,35 +13,8 @@ export default function ResetPasswordPage() {
   async function handleRequest() {
     e.preventDefault();
 
-    if (!email.trim()) {
-      setError('Please enter your email address.');
-      return;
-    }
-
-    setBusy(true);
-    setError('');
-
-    try {
-      const redirectTo = `${window.location.origin}/reset-password/confirm`;
-
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        email.trim(),
-        { redirectTo }
-      );
-
-      if (error) {
-        // Keep generic success response to prevent email enumeration
-        setSent(true);
-        return;
-      }
-
-      setSent(true);
-    } catch {
-      // Still show success to prevent email enumeration
-      setSent(true);
-    } finally {
-      setBusy(false);
-    }
+    return;
+   
   }
 
   return (
