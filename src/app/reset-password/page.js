@@ -171,9 +171,7 @@ export default function ResetPasswordPage() {
                 )}
 
                 <button
-                  
-                  id="reset-submit"
-disabled
+                  disabled
                   disabled={busy || !email.trim()}
                   className="btn btn-primary w-full"
                 >
