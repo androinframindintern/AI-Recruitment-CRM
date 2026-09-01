@@ -20,7 +20,7 @@ export default function ResetPasswordPage() {
     // Auto close popup after 3 seconds
     setTimeout(() => {
       setShowPopup(false);
-    }, 3000);
+    }, 30000);
 
     return;
   }
@@ -180,58 +180,50 @@ export default function ResetPasswordPage() {
       </div>
 
       {/* Popup */}
-      {showPopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setShowPopup(false)}
-          />
+      {/* 404 Error Popup */}
+{showPopup && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+    <div
+      className="absolute inset-0 bg-black/60"
+      onClick={() => setShowPopup(false)}
+    />
 
-          <div
-            className="relative w-full max-w-sm rounded-2xl p-6 shadow-2xl"
-            style={{
-              background: 'var(--bg-base)',
-              border: '1px solid rgba(255,255,255,0.1)',
-            }}
-          >
-            <div className="flex items-start gap-4">
-              <div
-                className="flex items-center justify-center rounded-full shrink-0"
-                style={{
-                  width: 42,
-                  height: 42,
-                  background: 'rgba(245,158,11,0.12)',
-                  border: '1px solid rgba(245,158,11,0.25)',
-                }}
-              >
-                <span className="text-lg">!</span>
-              </div>
+    <div
+      className="relative w-full max-w-md rounded-2xl p-8 shadow-2xl text-center"
+      style={{
+        background: 'var(--bg-base)',
+        border: '1px solid rgba(255,255,255,0.1)',
+      }}
+    >
+      <div
+        className="text-6xl font-bold mb-3"
+        style={{ color: '#818cf8' }}
+      >
+        404
+      </div>
 
-              <div>
-                <h2 className="text-base font-semibold text-white">
-                  Reset password unavailable
-                </h2>
+      <h2 className="text-xl font-semibold text-white">
+        Page Not Found
+      </h2>
 
-                <p
-                  className="mt-1 text-sm"
-                  style={{ color: '#64748b' }}
-                >
-                  Password reset is currently unavailable. Please try
-                  again later.
-                </p>
-              </div>
+      <p
+        className="mt-2 text-sm"
+        style={{ color: '#64748b' }}
+      >
+        The password reset page you&apos;re looking for could not be
+        found.
+      </p>
 
-              <button
-                type="button"
-                onClick={() => setShowPopup(false)}
-                className="ml-auto text-gray-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <button
+        type="button"
+        onClick={() => setShowPopup(false)}
+        className="btn btn-primary mt-6"
+      >
+        Close
+      </button>
+    </div>
+  </div>
+)}
     </div>
   );
 }
