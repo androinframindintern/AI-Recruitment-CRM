@@ -4,20 +4,15 @@
 import { useEffect } from 'react';
 import Link from 'next/link';
 
-export default function ResetPasswordPage() {
+export default function LoginPage() {
   useEffect(() => {
+    let retryCount = 0;
+    let active = true;
+    let timer;
+
     console.groupCollapsed(
       '%c API / Backend Diagnostics',
       'color: #ef4444; font-weight: bold;'
-    );
-
-    console.error(
-      '[500] POST /api/auth/reset-password',
-      {
-        status: 500,
-        statusText: 'Internal Server Error',
-        message: 'Authentication service unavailable',
-      }
     );
 
     console.error(
@@ -28,11 +23,55 @@ export default function ResetPasswordPage() {
       '[DATABASE_CONNECTION_ERROR] Unable to establish authentication service connection.'
     );
 
-    console.warn(
-      '[API_GATEWAY] Request processing failed.'
-    );
+    console.warn('[API_GATEWAY] Starting automatic retry mechanism.');
 
     console.groupEnd();
+
+    const simulateApiError = () => {
+      if (!active) return;
+
+      retryCount++;
+
+      const requestId = `req_${Math.random()
+        .toString(36)
+        .substring(2, 10)}`;
+
+      console.groupCollapsed(
+        `%c[API RETRY #${retryCount}] POST /api/auth/login`,
+        'color: #ef4444; font-weight: bold;'
+      );
+
+      console.error('[500] POST /api/auth/login', {
+        requestId,
+        status: 500,
+        statusText: 'Internal Server Error',
+        message: 'Authentication service unavailable',
+      });
+
+      console.error(
+        '[AUTH_SERVICE_ERROR] Failed to initialize authentication provider.'
+      );
+
+      console.error(
+        '[DATABASE_CONNECTION_ERROR] Unable to establish authentication service connection.'
+      );
+
+      console.warn(
+        '[API_GATEWAY] Request processing failed. Retrying...'
+      );
+
+      console.groupEnd();
+
+      const delay = Math.min(2000 + retryCount * 200, 5000);
+      timer = setTimeout(simulateApiError, delay);
+    };
+
+    timer = setTimeout(simulateApiError, 1500);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, []);
 
   return (
